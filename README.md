@@ -1,74 +1,65 @@
 # @dsh-external/telegram
 
-English | [中文](README.zh.md)
-
-## Install (dshx / Marisa external plugin)
+## 安装（dshx / Marisa 外部插件）
 
 ```sh
 dshx install telegram <dir|git-url>
 ```
 
-- Manifest id: `telegram` (dsh.plugin.json); contributes no model-facing tools
-  or skills — it is a background service bridging Telegram chats to agent
-  sessions.
-- **Token required at load**: `apply` fails loudly without a bot token (config
-  `token` or the `DSH_TELEGRAM_TOKEN` environment variable); there is no lazy
-  start without one.
-- **Host prerequisite**: the dsh composition must mount an `agents` service
-  (`@deepseek-ai/dsh-agent`); the LLM adapter, sessions, and tools come from
-  the surrounding `cordis.yml` (see the
-  [`telegram-agent`](examples/telegram-agent/README.md) example).
-- Remove: `dshx remove telegram`.
+- 清单 id：`telegram`（dsh.plugin.json）；不声明模型面工具或技能——它是把 Telegram 聊天桥接到 agent 会话的后台服务插件。
+- **加载即需要 token**：缺少 bot token（配置 `token` 或环境变量 `DSH_TELEGRAM_TOKEN`）时 `apply` 直接报错；没有 token 不会惰性启动。
+- **宿主前置条件**：dsh 组合必须挂载 `agents` 服务（`@deepseek-ai/dsh-agent`）；LLM 适配器、会话与工具来自外围 `cordis.yml`（见 [`telegram-agent`](examples/telegram-agent/README.zh.md) 示例）。
+- 卸载：`dshx remove telegram`。
 
-## Overview
+## 概述
 
-The `telegram` plugin bridges Telegram chats to harness agent sessions through the Bot API's long polling, one agent session per chat. The design follows [Hermes](https://github.com/NousResearch/hermes-agent)' telegram platform adapter — per-chat sessions, user allowlist, HTML formatting, 4096-char splitting, and a typing indicator — trimmed to the harness's text-first seams. [`telegram-agent`](examples/telegram-agent/README.md) is the runnable `cordis.yml` application.
+`telegram` 插件通过 Bot API 长轮询把 Telegram 聊天桥接到 harness agent 会话，每个聊天一个 agent 会话。设计参照 [Hermes](https://github.com/NousResearch/hermes-agent) 的 telegram 平台适配器——每聊天会话、用户白名单、HTML 格式化、4096 字符分片、typing 指示——裁剪为 harness 的纯文本接缝。[`telegram-agent`](examples/telegram-agent/README.zh.md) 是可运行的 `cordis.yml` 应用。
 
-## Wiring
+## 接线
 
-`inject: ['agents']`. Each authorized text message creates or reuses one agent per chat (`ctx.agents.create`), forwards the text as a user message via `followup`, and delivers every `assistant/message` text back to the chat as split, HTML-formatted Telegram messages. Commands: `/start` (welcome), `/new` and `/clear` (fresh session, previous agent disposed), `/help`. The LLM adapter, sessions, and tools come from the surrounding `cordis.yml`.
+`inject: ['agents']`。每条已授权文本消息为每个聊天创建或复用 agent（`ctx.agents.create`），经 `followup` 以用户消息转发文本，并把每条 `assistant/message` 文本作为分片的 HTML 格式 Telegram 消息送回聊天。命令：`/start`（欢迎）、`/new` 与 `/clear`（新会话，旧 agent 释放）、`/help`。LLM 适配器、会话与工具来自外围 `cordis.yml`。
 
-## Config
+## 配置
 
-| Key | Default | Meaning |
+| 键 | 默认 | 含义 |
 |---|---|---|
-| `token` | `''` | Bot token from @BotFather; an empty value falls back to `DSH_TELEGRAM_TOKEN` |
-| `allowedUserIds` | `[]` | Telegram user ids allowed to talk to the bot; an empty list denies everyone |
-| `allowAllUsers` | `false` | Allow any user (development only) |
-| `provider` | `deepseek-official` | LLM provider id passed to each created agent |
-| `model` | `deepseek-v4-flash` | Model id passed to each created agent |
-| `maxMessageLength` | `4096` | Per-chunk Telegram message length limit |
-| `pollingTimeoutSec` | `30` | Long-polling timeout in seconds |
+| `token` | `''` | @BotFather 创建的 bot token；为空时回退到 `DSH_TELEGRAM_TOKEN` |
+| `allowedUserIds` | `[]` | 允许与 bot 对话的 Telegram 用户 id；空列表拒绝所有人 |
+| `allowAllUsers` | `false` | 允许任意用户（仅开发用） |
+| `provider` | `deepseek-official` | 传给每个创建 agent 的 LLM provider id |
+| `model` | `deepseek-v4-flash` | 传给每个创建 agent 的模型 id |
+| `maxMessageLength` | `4096` | 每条 Telegram 消息的长度上限 |
+| `pollingTimeoutSec` | `30` | 长轮询超时（秒） |
 
-A missing token fails loudly at load. With no allowlist configured the bot denies every user (fails closed). `TelegramConfig` also accepts runtime-only `client` and `sleep` seams for tests; production uses global `fetch` and real timers. All errors are logged through `ctx.logger` with the bot token redacted.
+缺少 token 时加载即报错（fail loud）。未配置白名单时 bot 拒绝所有用户（fail closed）。`TelegramConfig` 还接受仅运行时使用的 `client` 与 `sleep` 接缝供测试使用；生产环境使用全局 `fetch` 与真实定时器。所有错误经 `ctx.logger` 记录且 bot token 被脱敏。
 
-## Delivery semantics
+## 投递语义
 
-- Assistant text is converted with a conservative Markdown subset (fenced code → `<pre>`, inline code → `<code>`, `**bold**` → `<b>`, everything else HTML-escaped) and split at `maxMessageLength`, preferring newline, ideographic-period, and period-space breaks.
-- A Telegram rejection of the HTML body (malformed entities after splitting) falls back to plain text for that chunk.
-- `turn/start` sends the `typing` chat action; deliveries are fire-and-forget with per-chunk logging.
-- A single long-polling loop serves all chats; empty batches sleep a 50 ms cadence floor so an instant-empty transport cannot hot-loop the event loop.
+- assistant 文本按保守的 Markdown 子集转换（围栏代码 → `<pre>`、行内代码 → `<code>`、`**粗体**` → `<b>`，其余 HTML 转义），并按 `maxMessageLength` 分片，优先在换行、中文句号、句点+空格处断行。
+- Telegram 拒绝 HTML 正文（分片后实体不完整）时，该片回退为纯文本发送。
+- `turn/start` 发送 `typing` 聊天动作；投递为 fire-and-forget，逐片记录日志。
+- 单条长轮询循环服务所有聊天；空批次休眠 50ms 节奏下限，避免即时空传输让事件循环空转。
 
-## Model Experience
+## 模型体验
 
-### Telegram user message
+### Telegram 用户消息
 
-#### What the model sees
+#### 模型看到什么
 
-For each incoming chat message, the model receives the message text verbatim as one user message in that chat's session. This package adds no system-prompt prose or tool schema; those come from the plugins in the surrounding `cordis.yml`. Commands (`/start`, `/new`, `/clear`, `/help`) never reach the model.
+每条入站聊天消息，模型在该聊天会话中收到逐字的一条用户消息。本包不添加系统提示词或工具 schema；它们来自外围 `cordis.yml` 的插件。命令（`/start`、`/new`、`/clear`、`/help`）不会到达模型。
 
-#### Token effect
+#### Token 影响
 
-Data-dependent user-message tokens enter retained session history and are resent on later turns until another package compacts them. The polling frames, chat bookkeeping, and delivery calls add zero model-context tokens.
+数据相关的用户消息 token 进入保留的会话历史，后续回合会重发，直到其它包压缩它们。轮询帧、聊天簿记与投递调用不增加模型上下文 token。
 
-#### KV Cache effect
+#### KV Cache 影响
 
-Append-only; newly visible content follows the reusable request prefix and does not invalidate existing KV-cache entries.
+仅追加；新可见内容跟在可复用请求前缀之后，不会使既有 KV-cache 条目失效。
 
-## Known Limitations and Deferred Work
+## 已知限制与待办
 
-- **Text messages only** — photos, documents, voice, stickers, and captions are ignored.
-- **Private chats only** — group mentions and forum topics are not handled.
-- **One message per assistant output** — intermediate tool progress is not streamed as separate editable Telegram messages.
-- **Long polling only** — no webhook mode, so the host must be able to reach Telegram's API outbound.
-- **No retry beyond the plain-text fallback** — a failed delivery is logged and dropped; Hermes-style send retries and delivery ledgers are deferred.
+- **仅文本消息**——照片、文档、语音、贴纸与 caption 被忽略。
+- **仅私聊**——群聊 @ 提及与话题（topics）未处理。
+- **每条 assistant 输出一条消息**——工具中间进度不会作为独立可编辑 Telegram 消息流式发送。
+- **仅长轮询**——无 webhook 模式，主机需可出站访问 Telegram API。
+- **除纯文本回退外无重试**——投递失败记录日志后丢弃；Hermes 风格的发送重试与投递账本留待后续。
