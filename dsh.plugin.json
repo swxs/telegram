@@ -1,0 +1,13 @@
+{
+  "id": "telegram",
+  "version": "0.1.0",
+  "main": "./lib/index.js",
+  "description": "Telegram Bot API bridge plugin: relay Telegram chats to harness agent sessions (long polling, per-chat sessions, HTML formatting)",
+  "engines": {
+    "dsh": ">=0.0.1"
+  },
+  "contributes": {
+    "tools": [],
+    "skills": []
+  }
+}

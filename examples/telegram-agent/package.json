@@ -1,0 +1,7 @@
+{
+  "name": "telegram-agent-example",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Telegram Bot API coding-agent composition"
+}

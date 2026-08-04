@@ -1,0 +1,102 @@
+# Coding-agent deployment reachable from Telegram. One agent session per
+# chat; the surrounding composition is the same spine as jsonrpc-agent, with
+# the Telegram bridge as the only presentation. The token and the user
+# allowlist arrive through the environment so no secret lands in this file.
+# Unlike jsonrpc-agent, stdout carries no protocol, so a console logger is safe.
+
+- id: logger-console
+  name: '@cordisjs/plugin-logger-console'
+
+- id: telegram
+  # This repository's build output is itself the plugin entry (relative to
+  # this config file). dshx install telegram <dir|git-url> mounts a copy the
+  # same way from any checkout; the surrounding @deepseek-ai/* rows resolve
+  # from the harness checkout's node_modules.
+  name: '../../lib/index.js'
+  config:
+    token: !!js process.env.DSH_TELEGRAM_TOKEN
+    # Empty allowlist denies everyone unless allowAllUsers opts into open
+    # access (development only) — misconfiguration fails closed, not open.
+    allowedUserIds: !!js "process.env.DSH_TELEGRAM_ALLOWED_USER_IDS === undefined ? [] : process.env.DSH_TELEGRAM_ALLOWED_USER_IDS.split(',').map(Number)"
+    allowAllUsers: !!js "process.env.DSH_TELEGRAM_ALLOW_ALL_USERS === 'true'"
+
+# The DeepSeek adapter. Shipped default: full thinking at max effort on every
+# request; exact-model resolution materializes request defaults before logging.
+- id: llm-deepseek
+  name: '@deepseek-ai/dsh-llm-deepseek'
+  config:
+    apiKey: !!js process.env.DEEPSEEK_API_KEY
+    baseURL: !!js process.env.DEEPSEEK_BASE_URL
+    thinking: enabled
+    reasoningEffort: max
+
+# Managed child-process groups for the bash executor (spawn/kill/output plumbing).
+- id: subprocess
+  name: '@deepseek-ai/dsh-subprocess-local'
+
+- id: bash
+  name: '@deepseek-ai/dsh-bash-local'
+  config:
+    cwd: !!js process.env.DSH_CWD ?? process.cwd()
+    timeoutMs: 60000
+
+- id: agent-spine
+  name: '@deepseek-ai/dsh-agent-spine-demo'
+  config:
+    persona: !!js process.env.DSH_SYSTEM_PROMPT ?? 'You are a coding agent.'
+    workspaceContext: false
+    skills:
+      enabled: false
+    toolBash:
+      enableRunInBackground: false
+    toolTasks: false
+
+- id: sessions
+  name: '@deepseek-ai/dsh-session-persistence-jsonl'
+  config:
+    root: !!js process.env.DSH_SESSION_ROOT ?? './.sessions'
+    # Snapshot runs read the raw JSONL back; production keeps zstd frames.
+    compression: !!js "process.env.DSH_SNAPSHOT === undefined ? 'zstd' : 'none'"
+
+- id: session-checkpoints
+  name: '@deepseek-ai/dsh-session-checkpoint-policy'
+
+- id: subagent
+  name: '@deepseek-ai/dsh-subagent'
+
+- id: subagent-spawn
+  name: '@deepseek-ai/dsh-subagent-spawn'
+  config:
+    providerName: spawn
+
+- id: tool-subagent
+  name: '@deepseek-ai/dsh-tool-subagent'
+  config:
+    provider: spawn
+    toolName: subagent
+    enableRunInBackground: false
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+
+- id: fs-local
+  name: '@deepseek-ai/dsh-fs-local'
+  config:
+    cwd: !!js process.env.DSH_CWD ?? process.cwd()
+
+- id: fs-policy
+  name: '@deepseek-ai/dsh-fs-policy'
+
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: token-meter
+  name: '@deepseek-ai/dsh-token-meter'
+
+- id: compact-basic
+  name: '@deepseek-ai/dsh-compact-basic'
+  config:
+    thresholdRatio: 0.8
+    retainRatio: 0.16
+    maxTokens: 8192
+    compactionRetries: 1
