@@ -2,7 +2,7 @@
 # Build the telegram external plugin: compile src/ → lib/ (JS) and
 # lib/types/ (declarations) with the dsh checkout's TypeScript.
 #
-# Dependency resolution mirrors marisa-panel / session-chatlog: the plugin's
+# Dependency resolution mirrors mygo-panel / session-chatlog: the plugin's
 # node_modules holds symlinks into the dsh checkout, so tsc type-checks
 # against the same vendored/workspace packages the running dsh ships (each
 # linked package's package.json resolves types to its built lib/types).
