@@ -1,5 +1,5 @@
 {
-  "name": "@dsh-external/telegram",
+  "name": "telegram",
   "description": "Telegram Bot API bridge plugin: relay Telegram chats to harness agent sessions (long polling, per-chat sessions, HTML formatting)",
   "version": "0.1.0",
   "private": true,

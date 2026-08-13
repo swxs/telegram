@@ -4,7 +4,7 @@
  * Telegram. The design mirrors Hermes' telegram platform adapter (per-chat
  * sessions, allowlist, HTML formatting, 4096-char splitting, typing
  * indicator), trimmed to the harness's text-first seams.
- * @module @dsh-external/telegram/bridge
+ * @module telegram/bridge
  */
 
 import type { Context } from '@deepseek-ai/cordis'

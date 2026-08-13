@@ -1,7 +1,7 @@
 /**
  * Telegram message formatting helpers: HTML escaping, a conservative
  * Markdown→HTML subset, and the 4096-character split Telegram enforces.
- * @module @dsh-external/telegram/format
+ * @module telegram/format
  */
 
 /**

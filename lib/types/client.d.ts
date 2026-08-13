@@ -2,7 +2,7 @@
  * Minimal Telegram Bot API client over `fetch`: long-polling `getUpdates`,
  * `sendMessage` with HTML or plain parse modes, `sendChatAction`, and `getMe`.
  * The token is embedded in the request URL, so every error path redacts it.
- * @module @dsh-external/telegram/client
+ * @module telegram/client
  */
 /** Telegram user object (sender of a message). */
 export interface TelegramUser {

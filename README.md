@@ -1,4 +1,4 @@
-# @dsh-external/telegram
+# telegram
 
 ## 安装（DSH profile bundle）
 

@@ -6,7 +6,7 @@
  * text-first seams. The surrounding `cordis.yml` supplies the LLM adapter,
  * agent spine, sessions, and tools.
  *
- * @module @dsh-external/telegram
+ * @module telegram
  */
 
 import type { Context } from '@deepseek-ai/cordis'
