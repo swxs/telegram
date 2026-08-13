@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 The Telegram Bot API coding-agent composition: message the bot and a harness agent replies, with one session per chat. The bridge design follows [Hermes](https://github.com/NousResearch/hermes-agent)' telegram platform adapter — per-chat sessions, user allowlist, HTML formatting, 4096-char splitting, and a typing indicator — trimmed to text messages only.
 
-The telegram row mounts this repository's build output (`../../lib/index.js` relative to this config). To run the bridge from a DeepSeek Harness checkout instead, install the plugin there first with `dshx install telegram <dir|git-url>` and point the row at the mounted entry.
+The telegram row mounts this repository's build output (`../../lib/index.js` relative to this config). To run the bridge from a DeepSeek Harness checkout instead, install the plugin there first with `mygo install telegram <dir|git-url>` and point the row at the mounted entry.
 
 The model-facing tools are:
 

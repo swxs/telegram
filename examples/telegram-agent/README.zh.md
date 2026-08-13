@@ -4,7 +4,7 @@
 
 Telegram Bot API 编码 agent 组合：给 bot 发消息，harness agent 回复，每个聊天一个会话。桥接设计参照 [Hermes](https://github.com/NousResearch/hermes-agent) 的 telegram 平台适配器——每聊天会话、用户白名单、HTML 格式化、4096 字符分片、typing 指示——裁剪为仅文本消息。
 
-telegram 一行挂载的是本仓库的构建产物（相对本配置的 `../../lib/index.js`）。要在 DeepSeek Harness checkout 里运行桥接，请先用 `dshx install telegram <dir|git-url>` 安装插件，并把该行指向挂载后的入口。
+telegram 一行挂载的是本仓库的构建产物（相对本配置的 `../../lib/index.js`）。要在 DeepSeek Harness checkout 里运行桥接，请先用 `mygo install telegram <dir|git-url>` 安装插件，并把该行指向挂载后的入口。
 
 模型可见工具：
 
