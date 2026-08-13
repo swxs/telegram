@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Context } from 'cordis'
+import type { Context } from '@deepseek-ai/cordis'
 import { TelegramBridge } from '../src/bridge.ts'
 import type { TelegramBridgeOptions } from '../src/bridge.ts'
 import type { TelegramClientLike, TelegramUpdate } from '../src/client.ts'

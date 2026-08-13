@@ -43,14 +43,22 @@ link_pkg() {
 echo "=== Linking build dependencies (checkout: $CHECKOUT) ==="
 mkdir -p node_modules/@deepseek-ai node_modules/@standard-schema
 ln -sfn "$CHECKOUT/node_modules/@types" node_modules/@types
-link_pkg cordis vendor/cordis
-link_pkg cosmokit vendor/cosmokit
-link_pkg schemastery vendor/schemastery
+link_pkg @deepseek-ai/cordis vendor/cordis
+link_pkg @deepseek-ai/cosmokit vendor/cosmokit
+link_pkg @deepseek-ai/schemastery vendor/schemastery
 link_pkg @deepseek-ai/dsh-agent packages/core/agent
 link_pkg @deepseek-ai/dsh-brand packages/util/brand
 link_pkg @deepseek-ai/dsh-llm packages/llm/llm
 link_pkg @deepseek-ai/dsh-scope packages/core/scope
 link_pkg @deepseek-ai/dsh-session packages/core/session
+
+# Test-only deps: the loader (plugin-shape spec) and the demo agent spine
+# (plugin-apply spec); vitest + its type deps so tests/ can run against the
+# same checkout if desired.
+link_pkg @deepseek-ai/cordis-plugin-loader vendor/loader
+link_pkg @deepseek-ai/dsh-agent-spine-demo packages/examples/agent-spine-demo
+ln -sfn "$CHECKOUT/node_modules/@vitest" node_modules/@vitest
+ln -sfn "$CHECKOUT/node_modules/vitest" node_modules/vitest
 
 # @standard-schema/spec: external npm types referenced by cordis/schemastery
 # declarations, hoisted only inside the pnpm store.

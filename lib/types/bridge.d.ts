@@ -6,7 +6,7 @@
  * indicator), trimmed to the harness's text-first seams.
  * @module @dsh-external/telegram/bridge
  */
-import type { Context } from 'cordis';
+import type { Context } from '@deepseek-ai/cordis';
 import type { TelegramClientLike } from './client.js';
 /** Options for {@link TelegramBridge}. */
 export interface TelegramBridgeOptions {

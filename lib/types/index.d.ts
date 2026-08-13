@@ -8,8 +8,8 @@
  *
  * @module @dsh-external/telegram
  */
-import type { Context } from 'cordis';
-import Schema from 'schemastery';
+import type { Context } from '@deepseek-ai/cordis';
+import Schema from '@deepseek-ai/schemastery';
 import type { TelegramBridgeOptions } from './bridge.js';
 export * from './bridge.js';
 export * from './client.js';

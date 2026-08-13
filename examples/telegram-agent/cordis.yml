@@ -9,7 +9,7 @@
 
 - id: telegram
   # This repository's build output is itself the plugin entry (relative to
-  # this config file). mygo install telegram <dir|git-url> mounts a copy the
+  # this config file). dsh plugin --profile web add <dir|git-url> mounts a copy the
   # same way from any checkout; the surrounding @deepseek-ai/* rows resolve
   # from the harness checkout's node_modules.
   name: '../../lib/index.js'

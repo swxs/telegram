@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Context } from 'cordis'
+import { Context } from '@deepseek-ai/cordis'
 import * as agentCore from '@deepseek-ai/dsh-agent-spine-demo'
 import * as telegram from '../src/index.ts'
 import type { TelegramClientLike } from '../src/client.ts'

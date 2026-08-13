@@ -1,15 +1,19 @@
 # @dsh-external/telegram
 
-## 安装（mygo 外部插件）
+## 安装（DSH profile bundle）
 
 ```sh
-mygo install telegram <dir|git-url>
+# 从本仓库 checkout 安装到 profile（web / headless 等），bundle 声明自动加入组合层
+dsh plugin --profile web add <dir|git-url>
+# 验证
+dsh --profile web --dump-config | grep telegram
 ```
 
-- 清单 id：`telegram`（dsh.plugin.json）；不声明模型面工具或技能——它是把 Telegram 聊天桥接到 agent 会话的后台服务插件。
+- 插入行 id：`telegram`（cordis.patch.yml）；不声明模型面工具或技能——它是把 Telegram 聊天桥接到 agent 会话的后台服务插件。
 - **加载即需要 token**：缺少 bot token（配置 `token` 或环境变量 `DSH_TELEGRAM_TOKEN`）时 `apply` 直接报错；没有 token 不会惰性启动。
 - **宿主前置条件**：dsh 组合必须挂载 `agents` 服务（`@deepseek-ai/dsh-agent`）；LLM 适配器、会话与工具来自外围 `cordis.yml`（见 [`telegram-agent`](examples/telegram-agent/README.zh.md) 示例）。
-- 卸载：`mygo remove telegram`。
+- 卸载：`dsh plugin --profile web remove telegram`。
+- 安装后需重启目标 profile 的 DSH 进程（组合层变更不参与 HMR 热更新）。
 
 ## 概述
 
