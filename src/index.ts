@@ -39,6 +39,8 @@ export const Config: Schema<TelegramConfig> = Schema.object({
   model: Schema.string().default('deepseek-v4-flash'),
   maxMessageLength: Schema.number().default(4096),
   pollingTimeoutSec: Schema.number().default(30),
+  cwd: Schema.string(),
+  preset: Schema.string(),
 })
 
 /**

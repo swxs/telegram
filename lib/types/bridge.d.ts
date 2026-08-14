@@ -26,6 +26,8 @@ export interface TelegramBridgeOptions {
     pollingTimeoutSec?: number;
     /** Agent working directory. */
     cwd?: string;
+    /** Deployment agent preset id each created agent joins (default when unset). */
+    preset?: string;
     /** Client seam; tests substitute a fake. */
     client?: TelegramClientLike;
     /** Delay seam; tests substitute an instant sleep. */

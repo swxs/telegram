@@ -34,6 +34,8 @@ export interface TelegramBridgeOptions {
   pollingTimeoutSec?: number
   /** Agent working directory. */
   cwd?: string
+  /** Deployment agent preset id each created agent joins (default when unset). */
+  preset?: string
   /** Client seam; tests substitute a fake. */
   client?: TelegramClientLike
   /** Delay seam; tests substitute an instant sleep. */
@@ -88,6 +90,7 @@ export class TelegramBridge {
   private readonly model: string
   private readonly maxMessageLength: number
   private readonly cwd: string
+  private readonly preset: string | undefined
   private readonly sleep: (ms: number) => Promise<void>
   private readonly chats = new Map<string, ChatSession>()
   private offset: number | undefined
@@ -111,6 +114,7 @@ export class TelegramBridge {
     this.model = options.model ?? 'deepseek-v4-flash'
     this.maxMessageLength = options.maxMessageLength ?? 4096
     this.cwd = options.cwd ?? process.cwd()
+    this.preset = options.preset
     this.sleep = options.sleep ?? ((ms: number) => new Promise(resolve => setTimeout(resolve, ms)))
   }
 
@@ -195,11 +199,14 @@ export class TelegramBridge {
         const chat = await this.ensureChat(chatId)
         const previous = chat.handle
         const sessionId = SessionId(`telegram:${chatId}:${Date.now()}`)
+        const composition = await this.composeAgent()
         const handle = await this.ctx.agents.create({
           sessionId,
-          meta: { cwd: this.cwd },
+          meta: { cwd: this.cwd, ...(composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset }) },
           agentOptions: { provider: this.provider, model: this.model },
+          setup: composition.setup,
         })
+        void this.attachWorkspace(String(sessionId))
         chat.handle = handle
         chat.sessionId = String(sessionId)
         await previous.dispose()
@@ -214,18 +221,61 @@ export class TelegramBridge {
     }
   }
 
+  /**
+   * Resolve the deployment agent preset and the setup that joins it, so the
+   * bot's agents carry the full tool catalog instead of the empty global
+   * layer. Mirrors dsh-host-apiproxy's composeAgent for the web surface.
+   */
+  private async composeAgent(): Promise<{
+    agentPreset?: string
+    setup?: (agentCtx: Context) => Promise<void>
+  }> {
+    const presets = this.ctx.get('agentPresets') as {
+      resolve(id?: string): Promise<{ id: string }>
+      mount(ctx: Context, id: string): Promise<void>
+    } | undefined
+    if (presets === undefined) return { setup: undefined }
+    const id = (await presets.resolve(this.preset)).id
+    return {
+      agentPreset: id,
+      setup: async agentCtx => { await presets.mount(agentCtx, id) },
+    }
+  }
+
+  /**
+   * Attach the session to the workspace for the bridge's cwd, so the chat
+   * shows under the right group in the harness GUI instead of [未分组].
+   * Best-effort: bookkeeping must never block message delivery.
+   */
+  private async attachWorkspace(sessionId: string): Promise<void> {
+    const registry = this.ctx.get('workspaceRegistry') as {
+      resolveByPath(path: string): Promise<{ attachSession(id: string): Promise<void> } | undefined>
+      create(path: string): Promise<{ attachSession(id: string): Promise<void> }>
+    } | undefined
+    if (registry === undefined) return
+    try {
+      const workspace = await registry.resolveByPath(this.cwd) ?? await registry.create(this.cwd)
+      await workspace.attachSession(sessionId)
+    } catch (error) {
+      this.ctx.logger.warn('[telegram] workspace attach failed for %s: %s', sessionId, messageOf(error))
+    }
+  }
+
   private async ensureChat(chatId: number): Promise<ChatSession> {
     const key = String(chatId)
     const existing = this.chats.get(key)
     if (existing !== undefined) return existing
     const sessionId = SessionId(`telegram:${key}`)
+    const composition = await this.composeAgent()
     const handle = await this.ctx.agents.create({
       sessionId,
-      meta: { cwd: this.cwd },
+      meta: { cwd: this.cwd, ...(composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset }) },
       agentOptions: { provider: this.provider, model: this.model },
+      setup: composition.setup,
     })
     const entry: ChatSession = { chatId, handle, sessionId: String(sessionId) }
     this.chats.set(key, entry)
+    void this.attachWorkspace(String(sessionId))
     return entry
   }
 
