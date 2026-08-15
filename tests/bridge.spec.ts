@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import { TelegramBridge } from '../src/bridge.ts'
 import type { TelegramBridgeOptions } from '../src/bridge.ts'
-import type { BotCommand, TelegramClientLike, TelegramUpdate } from '../src/client.ts'
+import type { BotCommand, InlineKeyboardMarkup, TelegramClientLike, TelegramUpdate } from '../src/client.ts'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 interface FakeAgent {
@@ -36,6 +36,8 @@ interface Harness {
     getUpdates: Mock
     sendMessage: Mock
     sendChatAction: Mock
+    editMessageText: Mock
+    answerCallbackQuery: Mock
     setMyCommands: Mock
     getMyCommands: Mock
   }
@@ -49,7 +51,10 @@ interface Harness {
   creates: CreateCall[]
   presets: { resolve: Mock; mount: Mock }
   attachSession: Mock
-  sent: { chatId: number; text: string; parseMode?: 'HTML' }[]
+  workspaces: { id: string, path: string, title: string, attachSession: Mock }[]
+  sent: { chatId: number, text: string, parseMode?: 'HTML', replyMarkup?: InlineKeyboardMarkup }[]
+  edits: { chatId: number, messageId: number, text: string, replyMarkup?: InlineKeyboardMarkup }[]
+  answers: { callbackQueryId: string, text?: string }[]
   actions: { chatId: number; action: string }[]
   polls: (number | undefined)[]
   sleeps: number[]
@@ -59,8 +64,8 @@ interface Harness {
 interface HarnessSeams {
   /** Default: a fake that resolves `preset ?? 'standard'`. `missing` omits the service. */
   agentPresets?: 'default' | 'missing'
-  /** Default: a fake workspace. `missing` omits it; `throwing` rejects attach. */
-  workspaceRegistry?: 'default' | 'missing' | 'throwing'
+  /** Default: two fake workspaces. `missing` omits the registry; `throwing` rejects attach; `empty` lists none. */
+  workspaceRegistry?: 'default' | 'missing' | 'throwing' | 'empty'
 }
 
 /** Poll an async condition for up to five seconds. */
@@ -81,6 +86,8 @@ async function settle(): Promise<void> {
 
 function createHarness(options: Partial<TelegramBridgeOptions> = {}, seams: HarnessSeams = {}): Harness {
   const sent: Harness['sent'] = []
+  const edits: Harness['edits'] = []
+  const answers: Harness['answers'] = []
   const actions: Harness['actions'] = []
   const polls: Harness['polls'] = []
   const sleeps: Harness['sleeps'] = []
@@ -91,10 +98,13 @@ function createHarness(options: Partial<TelegramBridgeOptions> = {}, seams: Harn
     resolve: vi.fn(async (id?: string) => ({ id: id ?? 'standard' })),
     mount: vi.fn(async () => {}),
   }
-  const workspace = { attachSession }
+  const workspaces = [
+    { id: 'ws-obsidian', path: 'D:\\codehouse\\obsidian', title: 'obsidian', attachSession },
+    { id: 'ws-telegram', path: 'D:\\codehouse\\telegram', title: 'telegram', attachSession },
+  ]
   const registry = {
-    resolveByPath: vi.fn(async () => workspace),
-    create: vi.fn(async () => workspace),
+    list: vi.fn(() => seams.workspaceRegistry === 'empty' ? [] : workspaces),
+    get: vi.fn((id: string) => workspaces.find(workspace => workspace.id === id)),
   }
   if (seams.workspaceRegistry === 'throwing') {
     attachSession.mockRejectedValue(new Error('attach failed'))
@@ -106,17 +116,37 @@ function createHarness(options: Partial<TelegramBridgeOptions> = {}, seams: Harn
     getUpdates: Mock
     sendMessage: Mock
     sendChatAction: Mock
+    editMessageText: Mock
+    answerCallbackQuery: Mock
     setMyCommands: Mock
     getMyCommands: Mock
   } = {
     getMe: vi.fn(async () => ({ id: 1, is_bot: true })),
     getUpdates: vi.fn(async (offset?: number) => { polls.push(offset); return [] as TelegramUpdate[] }),
-    sendMessage: vi.fn(async (chatId: number, text: string, parseMode?: 'HTML') => {
-      sent.push(parseMode === undefined ? { chatId, text } : { chatId, text, parseMode })
-      return { message_id: 1, chat: { id: chatId, type: 'private' }, date: 0 }
+    sendMessage: vi.fn(async (chatId: number, text: string, parseMode?: 'HTML', replyMarkup?: InlineKeyboardMarkup) => {
+      sent.push({
+        chatId,
+        text,
+        ...(parseMode === undefined ? {} : { parseMode }),
+        ...(replyMarkup === undefined ? {} : { replyMarkup }),
+      })
+      return { message_id: sent.length, chat: { id: chatId, type: 'private' }, text, date: 0 }
     }),
     sendChatAction: vi.fn(async (chatId: number, action: string) => {
       actions.push({ chatId, action })
+      return true
+    }),
+    editMessageText: vi.fn(async (chatId: number, messageId: number, text: string, replyMarkup?: InlineKeyboardMarkup) => {
+      edits.push({
+        chatId,
+        messageId,
+        text,
+        ...(replyMarkup === undefined ? {} : { replyMarkup }),
+      })
+      return { message_id: messageId, chat: { id: chatId, type: 'private' }, text, date: 0 }
+    }),
+    answerCallbackQuery: vi.fn(async (callbackQueryId: string, text?: string) => {
+      answers.push(text === undefined ? { callbackQueryId } : { callbackQueryId, text })
       return true
     }),
     setMyCommands: vi.fn(async (commands: readonly BotCommand[]) => {
@@ -172,7 +202,10 @@ function createHarness(options: Partial<TelegramBridgeOptions> = {}, seams: Harn
     creates,
     presets,
     attachSession,
+    workspaces,
     sent,
+    edits,
+    answers,
     actions,
     polls,
     sleeps,
@@ -184,9 +217,9 @@ function createHarness(options: Partial<TelegramBridgeOptions> = {}, seams: Harn
   return harness
 }
 
-function update(message: Partial<{ chatId: number; fromId: number; text: string }> = {}): TelegramUpdate {
+function update(message: Partial<{ chatId: number; fromId: number; text: string; updateId: number }> = {}): TelegramUpdate {
   return {
-    update_id: 1,
+    update_id: message.updateId ?? 1,
     message: {
       message_id: 1,
       chat: { id: message.chatId ?? 7, type: 'private' },
@@ -195,6 +228,39 @@ function update(message: Partial<{ chatId: number; fromId: number; text: string 
       date: 0,
     },
   }
+}
+
+function callbackUpdate(query: Partial<{
+  chatId: number
+  fromId: number
+  data: string
+  messageId: number
+  text: string
+  updateId: number
+  callbackId: string
+}> = {}): TelegramUpdate {
+  const chatId = query.chatId ?? 7
+  return {
+    update_id: query.updateId ?? 1,
+    callback_query: {
+      id: query.callbackId ?? 'cb1',
+      from: { id: query.fromId ?? 42 },
+      data: query.data ?? 'ws:ws-obsidian',
+      message: {
+        message_id: query.messageId ?? 10,
+        chat: { id: chatId, type: 'private' },
+        text: query.text ?? 'Choose a workspace.',
+        date: 0,
+      },
+    },
+  }
+}
+
+/** Bind chat 7 to the default obsidian Workspace so later messages have a session. */
+async function bindDefaultWorkspace(h: Harness, updateId = 1): Promise<void> {
+  const before = h.agents.length
+  h.client.getUpdates.mockResolvedValueOnce([callbackUpdate({ updateId })])
+  await waitFor(() => h.agents.length > before ? true : undefined, 'workspace bound')
 }
 
 describe('TelegramBridge', () => {
@@ -209,9 +275,9 @@ describe('TelegramBridge', () => {
     const h = createHarness()
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
-    h.client.getUpdates.mockResolvedValueOnce([update({ text: 'hello' })])
-    await waitFor(() => h.agents[0], 'agent created')
-    expect(h.agents[0]?.agent.followup).toHaveBeenCalledTimes(1)
+    await bindDefaultWorkspace(h)
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: 'hello', updateId: 2 })])
+    await waitFor(() => h.agents[0]?.agent.followup.mock.calls.length === 1 ? true : undefined, 'followup')
     const message = h.agents[0]?.agent.followup.mock.calls[0]?.[0] as { content: { text: string }[] }
     expect(message.content[0]?.text).toBe('hello')
   })
@@ -220,14 +286,14 @@ describe('TelegramBridge', () => {
     const h = createHarness()
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    await bindDefaultWorkspace(h)
     h.client.getUpdates.mockResolvedValueOnce([
-      update({ text: 'one' }),
-      { update_id: 2, message: { message_id: 2, chat: { id: 7, type: 'private' }, from: { id: 42 }, text: 'two', date: 0 } },
+      update({ text: 'one', updateId: 2 }),
+      { update_id: 3, message: { message_id: 2, chat: { id: 7, type: 'private' }, from: { id: 42 }, text: 'two', date: 0 } },
     ])
-    await waitFor(() => h.agents.length === 1 ? true : undefined, 'agent created')
-    await settle()
-    expect(h.agents[0]?.agent.followup).toHaveBeenCalledTimes(2)
-    await waitFor(() => h.polls.some(offset => offset === 3) ? true : undefined, 'offset advanced')
+    await waitFor(() => h.agents[0]?.agent.followup.mock.calls.length === 2 ? true : undefined, 'both followups')
+    expect(h.agents.length).toBe(1)
+    await waitFor(() => h.polls.some(offset => offset === 4) ? true : undefined, 'offset advanced')
   })
 
   it('denies unauthorized users with a notice', async () => {
@@ -244,7 +310,7 @@ describe('TelegramBridge', () => {
     const h = createHarness({ allowAllUsers: true })
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
-    h.client.getUpdates.mockResolvedValueOnce([update({ text: 'hi', fromId: 99 })])
+    h.client.getUpdates.mockResolvedValueOnce([callbackUpdate({ fromId: 99 })])
     await waitFor(() => h.agents.length === 1 ? true : undefined, 'agent created')
   })
 
@@ -258,31 +324,37 @@ describe('TelegramBridge', () => {
       { update_id: 3, message: { message_id: 3, chat: { id: 7, type: 'private' }, from: { id: 42 }, text: 'hi', date: 0 } },
     ])
     // The text update proves the batch was consumed: the no-message and
-    // no-text updates are ignored, the text update creates the chat agent.
-    await waitFor(() => h.agents.length === 1 ? true : undefined, 'text update processed')
+    // no-text updates are ignored; unbound text asks the user to /start.
+    await waitFor(() => h.sent.some(s => s.text === 'Choose a workspace first with /start.') ? true : undefined, 'text update processed')
     await settle()
-    expect(h.sent.length).toBe(0)
+    expect(h.agents.length).toBe(0)
   })
 
-  it('/start creates a session and sends the welcome', async () => {
+  it('/start lists workspaces and does not create a session', async () => {
     const h = createHarness()
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
     h.client.getUpdates.mockResolvedValueOnce([update({ text: '/start' })])
-    await waitFor(() => h.agents.length === 1 ? true : undefined, 'agent created')
-    await waitFor(() => h.sent.some(s => s.text.includes('Hello')) ? true : undefined, 'welcome sent')
+    await waitFor(() => h.sent.some(s => s.text.includes('Choose a workspace.')) ? true : undefined, 'picker sent')
+    expect(h.agents.length).toBe(0)
+    expect(h.sent[0]?.replyMarkup?.inline_keyboard).toEqual([
+      [{ text: 'obsidian', callback_data: 'ws:ws-obsidian' }],
+      [{ text: 'telegram', callback_data: 'ws:ws-telegram' }],
+    ])
+    expect(h.sent[0]?.text).toBe('Choose a workspace.')
+    expect(h.sent[0]?.text).not.toContain('D:\\codehouse\\')
   })
 
   it('/clear rotates the session agent and disposes the previous one', async () => {
     const h = createHarness()
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
-    h.client.getUpdates.mockResolvedValueOnce([update({ text: 'first' })])
-    await waitFor(() => h.agents.length === 1 ? true : undefined, 'first agent')
+    await bindDefaultWorkspace(h)
     const first = h.agents[0]!
-    h.client.getUpdates.mockResolvedValueOnce([{ ...update({ text: '/clear' }), update_id: 2 }])
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: '/clear', updateId: 2 })])
     await waitFor(() => h.agents.length === 2 ? true : undefined, 'second agent')
     expect(first.dispose).toHaveBeenCalledTimes(1)
+    expect(h.creates[1]?.meta?.cwd).toBe('D:\\codehouse\\obsidian')
     // Old-session events no longer deliver.
     h.emit(first.agent.session.id, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'stale' }] } } } as SessionEvent)
     await settle()
@@ -323,7 +395,7 @@ describe('TelegramBridge', () => {
     h.client.getUpdates.mockResolvedValueOnce([update({ text: '/init', fromId: 42 })])
     await waitFor(() => h.sent.some(s => s.text === 'Initialized the command menu.') ? true : undefined, 'init success')
     await expect(h.client.getMyCommands()).resolves.toEqual([
-      { command: 'start', description: 'start a session' },
+      { command: 'start', description: 'choose a workspace and start a session' },
       { command: 'clear', description: 'reset the current session' },
       { command: 'help', description: 'show this help' },
     ])
@@ -371,38 +443,39 @@ describe('TelegramBridge', () => {
     const h = createHarness({ maxMessageLength: 12 })
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
-    h.client.getUpdates.mockResolvedValueOnce([update({ text: 'go' })])
-    await waitFor(() => h.agents.length === 1 ? true : undefined, 'agent created')
+    await bindDefaultWorkspace(h)
     const long = 'a'.repeat(30)
+    const before = h.sent.length
     h.emit(h.agents[0]!.agent.session.id, {
       type: 'assistant/message',
       data: { message: { content: [{ type: 'text', text: long }] } },
     } as SessionEvent)
-    await waitFor(() => h.sent.length >= 3 ? true : undefined, 'chunks delivered')
-    expect(h.sent.map(s => s.text).join('')).toBe(long)
-    expect(h.sent.every(s => s.parseMode === 'HTML')).toBe(true)
+    await waitFor(() => h.sent.length >= before + 3 ? true : undefined, 'chunks delivered')
+    const chunks = h.sent.slice(before)
+    expect(chunks.map(s => s.text).join('')).toBe(long)
+    expect(chunks.every(s => s.parseMode === 'HTML')).toBe(true)
   })
 
   it('ignores assistant messages without text blocks', async () => {
     const h = createHarness()
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
-    h.client.getUpdates.mockResolvedValueOnce([update({ text: 'go' })])
-    await waitFor(() => h.agents.length === 1 ? true : undefined, 'agent created')
+    await bindDefaultWorkspace(h)
+    const before = h.sent.length
     h.emit(h.agents[0]!.agent.session.id, {
       type: 'assistant/message',
       data: { message: { content: [{ type: 'tool', id: 't' }] } },
     } as SessionEvent)
     await settle()
-    expect(h.sent.length).toBe(0)
+    expect(h.sent.length).toBe(before)
   })
 
   it('falls back to plain text when HTML delivery is rejected', async () => {
     const h = createHarness()
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
-    h.client.getUpdates.mockResolvedValueOnce([update({ text: 'go' })])
-    await waitFor(() => h.agents.length === 1 ? true : undefined, 'agent created')
+    await bindDefaultWorkspace(h)
+    const sendCallsBefore = h.client.sendMessage.mock.calls.length
     h.client.sendMessage
       .mockRejectedValueOnce(new Error('can\'t parse entities'))
       .mockResolvedValue({ message_id: 1, chat: { id: 7, type: 'private' }, date: 0 })
@@ -410,9 +483,9 @@ describe('TelegramBridge', () => {
       type: 'assistant/message',
       data: { message: { content: [{ type: 'text', text: '<b>hi</b>' }] } },
     } as SessionEvent)
-    await waitFor(() => h.client.sendMessage.mock.calls.length >= 2 ? true : undefined, 'fallback sent')
-    const first = h.client.sendMessage.mock.calls[0] as [number, string, 'HTML' | undefined]
-    const second = h.client.sendMessage.mock.calls[1] as [number, string, 'HTML' | undefined]
+    await waitFor(() => h.client.sendMessage.mock.calls.length >= sendCallsBefore + 2 ? true : undefined, 'fallback sent')
+    const first = h.client.sendMessage.mock.calls[sendCallsBefore] as [number, string, 'HTML' | undefined]
+    const second = h.client.sendMessage.mock.calls[sendCallsBefore + 1] as [number, string, 'HTML' | undefined]
     expect(first).toEqual([7, '&lt;b&gt;hi&lt;/b&gt;', 'HTML'])
     expect(second).toEqual([7, '<b>hi</b>'])
   })
@@ -421,8 +494,7 @@ describe('TelegramBridge', () => {
     const h = createHarness()
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
-    h.client.getUpdates.mockResolvedValueOnce([update({ text: 'go' })])
-    await waitFor(() => h.agents.length === 1 ? true : undefined, 'agent created')
+    await bindDefaultWorkspace(h)
     h.client.sendMessage.mockRejectedValue(new Error('network down'))
     h.emit(h.agents[0]!.agent.session.id, {
       type: 'assistant/message',
@@ -445,9 +517,8 @@ describe('TelegramBridge', () => {
     const h = createHarness()
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    await bindDefaultWorkspace(h)
     h.client.sendChatAction.mockRejectedValue(new Error('action down'))
-    h.client.getUpdates.mockResolvedValueOnce([update({ text: 'go' })])
-    await waitFor(() => h.agents.length === 1 ? true : undefined, 'agent created')
     h.emit(h.agents[0]!.agent.session.id, { type: 'turn/start', data: {} } as SessionEvent)
     await waitFor(() => h.ctx.logger.warn.mock.calls.length > 0 ? true : undefined, 'action warning logged')
     expect(h.ctx.logger.warn.mock.calls[0]?.[0]).toBe('[telegram] chat action %s failed: %s')
@@ -457,8 +528,7 @@ describe('TelegramBridge', () => {
     const h = createHarness()
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
-    h.client.getUpdates.mockResolvedValueOnce([update({ text: 'go' })])
-    await waitFor(() => h.agents.length === 1 ? true : undefined, 'agent created')
+    await bindDefaultWorkspace(h)
     h.emit(h.agents[0]!.agent.session.id, { type: 'turn/start', data: {} } as SessionEvent)
     await waitFor(() => h.actions.length === 1 ? true : undefined, 'typing sent')
     expect(h.actions[0]).toEqual({ chatId: 7, action: 'typing' })
@@ -468,12 +538,13 @@ describe('TelegramBridge', () => {
     const h = createHarness()
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
-    h.client.getUpdates.mockResolvedValueOnce([update({ text: 'go' })])
-    await waitFor(() => h.agents.length === 1 ? true : undefined, 'agent created')
+    await bindDefaultWorkspace(h)
+    const sentBefore = h.sent.length
+    const actionsBefore = h.actions.length
     h.emit(h.agents[0]!.agent.session.id, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } } as SessionEvent)
     await settle()
-    expect(h.sent.length).toBe(0)
-    expect(h.actions.length).toBe(0)
+    expect(h.sent.length).toBe(sentBefore)
+    expect(h.actions.length).toBe(actionsBefore)
   })
 
   it('ignores session events from foreign sessions', async () => {
@@ -501,7 +572,7 @@ describe('TelegramBridge', () => {
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
     h.ctx.agents.create.mockRejectedValue(new Error('no adapter'))
-    h.client.getUpdates.mockResolvedValueOnce([update({ text: 'go' })])
+    h.client.getUpdates.mockResolvedValueOnce([callbackUpdate()])
     await waitFor(() => h.ctx.logger.error.mock.calls.length > 0 ? true : undefined, 'update error logged')
     const [format, id, reason] = h.ctx.logger.error.mock.calls[0] as [string, number, string]
     expect(format).toContain('update %d failed')
@@ -513,8 +584,7 @@ describe('TelegramBridge', () => {
     const h = createHarness()
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
-    h.client.getUpdates.mockResolvedValueOnce([update({ text: 'go' })])
-    await waitFor(() => h.agents.length === 1 ? true : undefined, 'agent created')
+    await bindDefaultWorkspace(h)
     await h.bridge.stop()
     const pollCount = h.polls.length
     await settle()
@@ -537,6 +607,8 @@ describe('TelegramBridge', () => {
       getUpdates: vi.fn(async () => [] as TelegramUpdate[]),
       sendMessage: vi.fn(async () => ({ message_id: 1, chat: { id: 7, type: 'private' }, date: 0 })),
       sendChatAction: vi.fn(async () => true),
+      editMessageText: vi.fn(async () => ({ message_id: 1, chat: { id: 7, type: 'private' }, date: 0 })),
+      answerCallbackQuery: vi.fn(async () => true),
       setMyCommands: vi.fn(async () => true),
       getMyCommands: vi.fn(async () => []),
     }
@@ -580,7 +652,7 @@ describe('TelegramBridge', () => {
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
     h.client.getUpdates.mockResolvedValueOnce([
       null as unknown as TelegramUpdate,
-      update({ text: 'hi' }),
+      callbackUpdate({ updateId: 2 }),
     ])
     await waitFor(() => h.agents.length === 1 ? true : undefined, 'valid update processed')
     expect(h.ctx.logger.warn.mock.calls.some((call: unknown[]) => String(call[0]).includes('skipped malformed update'))).toBe(true)
@@ -603,12 +675,11 @@ describe('TelegramBridge', () => {
     expect(h.client.getUpdates).toHaveBeenCalledTimes(1)
   })
 
-  it('mounts the resolved preset and attaches the session on first chat', async () => {
-    const h = createHarness({ preset: 'coding', cwd: 'D:\\codehouse\\obsidian' })
+  it('mounts the resolved preset and attaches the session on first pick', async () => {
+    const h = createHarness({ preset: 'coding', cwd: 'D:\\ignored-config-cwd' })
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
-    h.client.getUpdates.mockResolvedValueOnce([update({ text: 'hello' })])
-    await waitFor(() => h.agents.length === 1 ? true : undefined, 'agent created')
+    await bindDefaultWorkspace(h)
     expect(h.presets.resolve).toHaveBeenCalledWith('coding')
     expect(h.creates[0]?.meta).toEqual({ cwd: 'D:\\codehouse\\obsidian', agentPreset: 'coding' })
     expect(h.creates[0]?.setup).toBeTypeOf('function')
@@ -622,12 +693,11 @@ describe('TelegramBridge', () => {
     const h = createHarness()
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
-    h.client.getUpdates.mockResolvedValueOnce([update({ text: 'first' })])
-    await waitFor(() => h.agents.length === 1 ? true : undefined, 'first agent')
-    h.client.getUpdates.mockResolvedValueOnce([{ ...update({ text: '/clear' }), update_id: 2 }])
+    await bindDefaultWorkspace(h)
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: '/clear', updateId: 2 })])
     await waitFor(() => h.agents.length === 2 ? true : undefined, 'second agent')
     expect(h.creates).toHaveLength(2)
-    expect(h.creates[1]?.meta?.agentPreset).toBe('standard')
+    expect(h.creates[1]?.meta).toEqual({ cwd: 'D:\\codehouse\\obsidian', agentPreset: 'standard' })
     expect(h.creates[1]?.setup).toBeTypeOf('function')
     await waitFor(() => h.attachSession.mock.calls.length === 2 ? true : undefined, 'both sessions attached')
   })
@@ -636,9 +706,9 @@ describe('TelegramBridge', () => {
     const h = createHarness({}, { workspaceRegistry: 'throwing' })
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
-    h.client.getUpdates.mockResolvedValueOnce([update({ text: 'hello' })])
-    await waitFor(() => h.agents.length === 1 ? true : undefined, 'agent created')
+    await bindDefaultWorkspace(h)
     await waitFor(() => h.ctx.logger.warn.mock.calls.some((call: unknown[]) => String(call[0]).includes('workspace attach failed')) ? true : undefined, 'attach warning')
+    expect(h.sent.some(s => s.text === 'The session could not be attached to this workspace. It is still available.')).toBe(true)
     h.emit(h.agents[0]!.agent.session.id, {
       type: 'assistant/message',
       data: { message: { content: [{ type: 'text', text: 'pong' }] } },
@@ -646,14 +716,130 @@ describe('TelegramBridge', () => {
     await waitFor(() => h.sent.some(s => s.text === 'pong') ? true : undefined, 'reply delivered')
   })
 
-  it('skips workspace attach when the registry is absent', async () => {
+  it('does not create a session when the registry is absent', async () => {
     const h = createHarness({}, { workspaceRegistry: 'missing' })
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
-    h.client.getUpdates.mockResolvedValueOnce([update({ text: 'hello' })])
-    await waitFor(() => h.agents.length === 1 ? true : undefined, 'agent created')
-    await settle()
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: '/start' })])
+    await waitFor(() => h.sent.some(s => s.text === 'No workspaces are available. Create one in DeepSeek Harness first.') ? true : undefined, 'empty notice')
+    expect(h.agents.length).toBe(0)
     expect(h.attachSession).not.toHaveBeenCalled()
-    expect(h.creates[0]?.meta?.agentPreset).toBe('standard')
+  })
+
+  it('prompts to choose a workspace before a text message is handled', async () => {
+    const h = createHarness()
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: 'hello' })])
+    await waitFor(() => h.sent.some(s => s.text === 'Choose a workspace first with /start.') ? true : undefined, 'prompt sent')
+    expect(h.agents.length).toBe(0)
+  })
+
+  it('/clear without a binding prompts to choose a workspace', async () => {
+    const h = createHarness()
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: '/clear' })])
+    await waitFor(() => h.sent.some(s => s.text === 'Choose a workspace first with /start.') ? true : undefined, 'prompt sent')
+    expect(h.agents.length).toBe(0)
+  })
+
+  it('/start with an empty workspace list does not create a session', async () => {
+    const h = createHarness({}, { workspaceRegistry: 'empty' })
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: '/start' })])
+    await waitFor(() => h.sent.some(s => s.text === 'No workspaces are available. Create one in DeepSeek Harness first.') ? true : undefined, 'empty notice')
+    expect(h.agents.length).toBe(0)
+  })
+
+  it('picking a workspace creates a session, strips buttons, and welcomes', async () => {
+    const h = createHarness()
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    h.client.getUpdates.mockResolvedValueOnce([callbackUpdate({ messageId: 10, text: 'Choose a workspace.' })])
+    await waitFor(() => h.sent.some(s => s.text.includes('Hello')) ? true : undefined, 'welcome sent')
+    expect(h.creates[0]?.meta?.cwd).toBe('D:\\codehouse\\obsidian')
+    expect(h.sent.some(s => s.text === 'Using workspace: obsidian\nD:\\codehouse\\obsidian')).toBe(true)
+    expect(h.edits[0]).toMatchObject({ chatId: 7, messageId: 10, replyMarkup: { inline_keyboard: [] } })
+    expect(h.answers[0]).toEqual({ callbackQueryId: 'cb1' })
+  })
+
+  it('picking the same workspace keeps the current session', async () => {
+    const h = createHarness()
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    await bindDefaultWorkspace(h)
+    expect(h.agents.length).toBe(1)
+    h.client.getUpdates.mockResolvedValueOnce([callbackUpdate({ updateId: 2, callbackId: 'cb2' })])
+    await waitFor(() => h.sent.filter(s => s.text.startsWith('Using workspace:')).length === 2 ? true : undefined, 'second confirm')
+    expect(h.agents.length).toBe(1)
+    expect(h.sent.filter(s => s.text.includes('Hello')).length).toBe(1)
+  })
+
+  it('picking a different workspace parks the previous session', async () => {
+    const h = createHarness()
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    await bindDefaultWorkspace(h)
+    const first = h.agents[0]!
+    h.client.getUpdates.mockResolvedValueOnce([callbackUpdate({ updateId: 2, data: 'ws:ws-telegram', callbackId: 'cb2' })])
+    await waitFor(() => h.agents.length === 2 ? true : undefined, 'second agent')
+    expect(first.dispose).not.toHaveBeenCalled()
+    expect(h.creates[1]?.meta?.cwd).toBe('D:\\codehouse\\telegram')
+    expect(h.sent.some(s => s.text === 'Using workspace: telegram\nD:\\codehouse\\telegram')).toBe(true)
+    expect(h.sent.filter(s => s.text.includes('Hello')).length).toBe(2)
+  })
+
+  it('picking a previously used workspace restores the parked session', async () => {
+    const h = createHarness()
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    await bindDefaultWorkspace(h)
+    const first = h.agents[0]!
+    h.client.getUpdates.mockResolvedValueOnce([callbackUpdate({ updateId: 2, data: 'ws:ws-telegram', callbackId: 'cb2' })])
+    await waitFor(() => h.agents.length === 2 ? true : undefined, 'second agent')
+    h.client.getUpdates.mockResolvedValueOnce([callbackUpdate({ updateId: 3, data: 'ws:ws-obsidian', callbackId: 'cb3' })])
+    await waitFor(() => h.sent.filter(s => s.text === 'Using workspace: obsidian\nD:\\codehouse\\obsidian').length === 2 ? true : undefined, 'restored confirm')
+    expect(h.agents.length).toBe(2)
+    expect(first.dispose).not.toHaveBeenCalled()
+    expect(h.creates.length).toBe(2)
+    expect(h.sent.filter(s => s.text.includes('Hello')).length).toBe(2)
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: 'back', updateId: 4 })])
+    await waitFor(() => first.agent.followup.mock.calls.length === 1 ? true : undefined, 'restored followup')
+  })
+
+  it('marks the current workspace on a later /start list', async () => {
+    const h = createHarness()
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    await bindDefaultWorkspace(h)
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: '/start', updateId: 2 })])
+    await waitFor(() => h.sent.filter(s => s.replyMarkup !== undefined).length === 1 ? true : undefined, 'second picker')
+    const picker = h.sent.findLast(s => s.replyMarkup !== undefined)
+    expect(picker?.replyMarkup?.inline_keyboard).toEqual([
+      [{ text: '✓ obsidian', callback_data: 'ws:ws-obsidian' }],
+      [{ text: 'telegram', callback_data: 'ws:ws-telegram' }],
+    ])
+  })
+
+  it('re-lists when the picked workspace is gone', async () => {
+    const h = createHarness()
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    h.client.getUpdates.mockResolvedValueOnce([callbackUpdate({ data: 'ws:missing' })])
+    await waitFor(() => h.sent.some(s => s.text === 'That workspace is no longer available.') ? true : undefined, 'gone notice')
+    expect(h.agents.length).toBe(0)
+    expect(h.sent.some(s => s.replyMarkup !== undefined)).toBe(true)
+  })
+
+  it('denies unauthorized callback queries without creating a session', async () => {
+    const h = createHarness({ allowAllUsers: false, allowedUserIds: [1] })
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    h.client.getUpdates.mockResolvedValueOnce([callbackUpdate({ fromId: 42 })])
+    await waitFor(() => h.answers.some(a => a.text === 'Access denied.') ? true : undefined, 'denied toast')
+    expect(h.agents.length).toBe(0)
+    expect(h.edits.length).toBe(0)
   })
 })

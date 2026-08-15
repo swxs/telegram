@@ -21,7 +21,7 @@ dsh --profile web --dump-config | grep telegram
 
 ## 接线
 
-`inject: ['agents', 'agentPresets']`。每条已授权文本消息为每个聊天创建或复用 agent（`ctx.agents.create`），经 `followup` 以用户消息转发文本，并把每条 `assistant/message` 文本作为分片的 HTML 格式 Telegram 消息送回聊天。创建 agent 时会 `agentPresets.mount()` 当前部署预设（web profile 默认为 `standard`），否则会话是零工具的。`workspaceRegistry` 可选：若存在，则按 `cwd` 把会话挂到对应工作区，避免 GUI 显示「未分组」；挂载失败只记日志，不挡住消息。命令：`/start`（欢迎）、`/clear`（新会话，旧 agent 释放）、`/help`。LLM 适配器、会话来自外围 `cordis.yml`。缺少 `agentPresets` 时加载即失败。
+`inject: ['agents', 'agentPresets']`。`/start` 列出 `workspaceRegistry` 中的 Workspace，用户用 Inline Keyboard 选择后，才为该聊天创建 agent（`ctx.agents.create`，`meta.cwd` 为所选 Workspace 的 path）并 `attachSession`。之后每条已授权文本消息复用该聊天的 agent，经 `followup` 以用户消息转发文本，并把每条 `assistant/message` 文本作为分片的 HTML 格式 Telegram 消息送回聊天。创建 agent 时会 `agentPresets.mount()` 当前部署预设（web profile 默认为 `standard`），否则会话是零工具的。`workspaceRegistry` 可选：缺失或列表为空时 `/start` 提示没有可选 Workspace，不建会话。`attachSession` 失败会告知用户，会话仍可用。命令：`/start`（选择 Workspace 并开始会话）、`/clear`（在已绑定 Workspace 下新开会话，旧 agent 释放）、`/help`。绑定只活在内存里，进程重启后需再 `/start`。LLM 适配器、会话来自外围 `cordis.yml`。缺少 `agentPresets` 时加载即失败。
 
 ## 配置
 
@@ -34,11 +34,11 @@ dsh --profile web --dump-config | grep telegram
 | `model` | `deepseek-v4-flash` | 传给每个创建 agent 的模型 id |
 | `maxMessageLength` | `4096` | 每条 Telegram 消息的长度上限 |
 | `pollingTimeoutSec` | `30` | 长轮询超时（秒） |
-| `cwd` | 进程 `cwd` | 每个 agent 会话的工作目录；也用于解析/创建 workspace 分组 |
+| `cwd` | （未使用） | 保留字段，避免旧 profile 加载失败；运行时忽略。会话工作目录来自用户在 `/start` 选中的 Workspace |
 | `preset` | 组合默认预设 | 每个新建 agent 加入的 agent 预设 id；未设时走 `agentPresets.resolve()` 的默认 |
 | `initAdminUserIds` | `[]` | 允许发送 `/init` 登记 Command Menu 的 Telegram 用户 id；空列表则谁都不能 `/init` |
 
-缺少 token 时加载即报错（fail loud）。缺少 `agentPresets` 服务时同样加载失败——零工具 agent 看起来像在聊，实际不能干活。未配置白名单时 bot 拒绝所有用户（fail closed）。`workspaceRegistry` 缺失或 `attachSession` 失败不会阻止插件加载或消息投递。`TelegramConfig` 还接受仅运行时使用的 `client` 与 `sleep` 接缝供测试使用；生产环境使用全局 `fetch` 与真实定时器。所有错误经 `ctx.logger` 记录且 bot token 被脱敏。
+缺少 token 时加载即报错（fail loud）。缺少 `agentPresets` 服务时同样加载失败——零工具 agent 看起来像在聊，实际不能干活。未配置白名单时 bot 拒绝所有用户（fail closed）。`workspaceRegistry` 缺失不会阻止插件加载，但用户无法选择 Workspace、也就不会建会话。`TelegramConfig` 还接受仅运行时使用的 `client` 与 `sleep` 接缝供测试使用；生产环境使用全局 `fetch` 与真实定时器。所有错误经 `ctx.logger` 记录且 bot token 被脱敏。
 
 ## 投递语义
 
@@ -53,7 +53,7 @@ dsh --profile web --dump-config | grep telegram
 
 #### 模型看到什么
 
-每条入站聊天消息，模型在该聊天会话中收到逐字的一条用户消息。本包不添加系统提示词或工具 schema；它们来自外围 `cordis.yml` 的插件。命令（`/start`、`/clear`、`/help`、`/init`）不会到达模型。
+每条入站聊天消息，模型在该聊天会话中收到逐字的一条用户消息。本包不添加系统提示词或工具 schema；它们来自外围 `cordis.yml` 的插件。命令（`/start`、`/clear`、`/help`、`/init`）和 Workspace 选择回调查询不会到达模型。
 
 #### Token 影响
 

@@ -19,3 +19,11 @@ _Avoid_: setup, bootstrap, register-commands
 **Init Admin**:
 An authorized Telegram user who is also on the Init Admin list. Authorization is the existing allowlist or allow-all; the Init Admin list is a second gate. An empty list means nobody can `/init`.
 _Avoid_: operator, owner, superuser, admin (unqualified)
+
+**Workspace**:
+A persistent dsh record of a directory the user works in: a stable id over a canonical path, a display title, and the sessions that belong to it. A Session belongs to a Workspace only when its immutable working directory matches that path and the Session is on the Workspace's ledger.
+_Avoid_: cwd, folder, project, working directory, 工作目录 (unqualified)
+
+**Workspace binding**:
+The in-memory association of one Telegram chat with one Workspace. Sessions created in that chat use that Workspace's path and are attached to its ledger. Switching Workspace parks the previous session so it stays on that Workspace's ledger; `/clear` and process stop dispose it. The binding is lost when the process restarts.
+_Avoid_: cwd, selected folder, working directory

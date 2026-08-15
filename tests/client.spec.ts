@@ -38,7 +38,7 @@ describe('TelegramClient', () => {
     const client = new TelegramClient('t:ok', { fetch: fetchImpl as typeof fetch, pollingTimeoutSec: 15 })
     await client.getUpdates(42)
     const body = JSON.parse((fetchImpl.mock.calls[0]?.[1] as RequestInit).body as string) as Record<string, unknown>
-    expect(body).toMatchObject({ offset: 42, timeout: 15, allowed_updates: ['message'] })
+    expect(body).toMatchObject({ offset: 42, timeout: 15, allowed_updates: ['message', 'callback_query'] })
   })
 
   it('getUpdates omits offset when starting fresh', async () => {
@@ -60,6 +60,36 @@ describe('TelegramClient', () => {
     expect(body).toMatchObject({ parse_mode: 'HTML' })
   })
 
+  it('sendMessage forwards an inline keyboard when provided', async () => {
+    const markup = { inline_keyboard: [[{ text: 'obsidian', callback_data: 'ws:1' }]] }
+    const fetchImpl = fetchMock(async () => jsonResponse({ ok: true, result: { message_id: 1, chat: { id: 7, type: 'private' }, date: 0 } }))
+    const client = new TelegramClient('t:ok', { fetch: fetchImpl as typeof fetch })
+    await client.sendMessage(7, 'Choose a workspace.', undefined, markup)
+    const body = JSON.parse((fetchImpl.mock.calls[0]?.[1] as RequestInit).body as string) as Record<string, unknown>
+    expect(body).toEqual({ chat_id: 7, text: 'Choose a workspace.', reply_markup: markup })
+  })
+
+  it('editMessageText posts chat, message, text, and optional keyboard', async () => {
+    const fetchImpl = fetchMock(async () => jsonResponse({ ok: true, result: { message_id: 3, chat: { id: 7, type: 'private' }, date: 0 } }))
+    const client = new TelegramClient('t:ok', { fetch: fetchImpl as typeof fetch })
+    await client.editMessageText(7, 3, 'Choose a workspace.', { inline_keyboard: [] })
+    const body = JSON.parse((fetchImpl.mock.calls[0]?.[1] as RequestInit).body as string) as Record<string, unknown>
+    expect(body).toEqual({
+      chat_id: 7,
+      message_id: 3,
+      text: 'Choose a workspace.',
+      reply_markup: { inline_keyboard: [] },
+    })
+  })
+
+  it('answerCallbackQuery posts the query id and optional toast', async () => {
+    const fetchImpl = fetchMock(async () => jsonResponse({ ok: true, result: true }))
+    const client = new TelegramClient('t:ok', { fetch: fetchImpl as typeof fetch })
+    await expect(client.answerCallbackQuery('cb1', 'Access denied.')).resolves.toBe(true)
+    const body = JSON.parse((fetchImpl.mock.calls[0]?.[1] as RequestInit).body as string) as Record<string, unknown>
+    expect(body).toEqual({ callback_query_id: 'cb1', text: 'Access denied.' })
+  })
+
   it('sendChatAction posts the action', async () => {
     const fetchImpl = fetchMock(async () => jsonResponse({ ok: true, result: true }))
     const client = new TelegramClient('t:ok', { fetch: fetchImpl as typeof fetch })
@@ -68,7 +98,7 @@ describe('TelegramClient', () => {
 
   it('setMyCommands posts the list without scope or language_code', async () => {
     const commands = [
-      { command: 'start', description: 'start a session' },
+      { command: 'start', description: 'choose a workspace and start a session' },
       { command: 'clear', description: 'reset the current session' },
       { command: 'help', description: 'show this help' },
     ]

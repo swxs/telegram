@@ -38,6 +38,12 @@ function fakeClient(): TelegramClientLike & { polls: number } {
     async sendChatAction() {
       return true
     },
+    async editMessageText() {
+      return { message_id: 1, chat: { id: 7, type: 'private' }, date: 0 }
+    },
+    async answerCallbackQuery() {
+      return true
+    },
     async setMyCommands() {
       return true
     },

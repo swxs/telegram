@@ -1,6 +1,7 @@
 /**
  * Minimal Telegram Bot API client over `fetch`: long-polling `getUpdates`,
- * `sendMessage` with HTML or plain parse modes, `sendChatAction`, `getMe`,
+ * `sendMessage` with HTML or plain parse modes and optional inline keyboards,
+ * `editMessageText`, `answerCallbackQuery`, `sendChatAction`, `getMe`,
  * and default-slot Command Menu `setMyCommands` / `getMyCommands`.
  * The token is embedded in the request URL, so every error path redacts it.
  * @module telegram/client
@@ -32,10 +33,30 @@ export interface TelegramMessage {
   readonly date: number
 }
 
-/** Telegram update envelope; only message updates are modeled. */
+/** One button in an inline keyboard. */
+export interface InlineKeyboardButton {
+  readonly text: string
+  readonly callback_data?: string
+}
+
+/** Reply markup that attaches an inline keyboard under a message. */
+export interface InlineKeyboardMarkup {
+  readonly inline_keyboard: readonly (readonly InlineKeyboardButton[])[]
+}
+
+/** Callback from an inline-keyboard press. */
+export interface TelegramCallbackQuery {
+  readonly id: string
+  readonly from: TelegramUser
+  readonly message?: TelegramMessage
+  readonly data?: string
+}
+
+/** Telegram update envelope; message and callback_query updates are modeled. */
 export interface TelegramUpdate {
   readonly update_id: number
   readonly message?: TelegramMessage
+  readonly callback_query?: TelegramCallbackQuery
 }
 
 /** One Command Menu entry; `command` has no leading `/`. */
@@ -50,8 +71,12 @@ export interface TelegramClientLike {
   getMe(): Promise<TelegramUser>
   /** Long-poll for updates at or after `offset`. */
   getUpdates(offset?: number): Promise<TelegramUpdate[]>
-  /** Send a message, optionally with HTML parse mode. */
-  sendMessage(chatId: number, text: string, parseMode?: 'HTML'): Promise<TelegramMessage>
+  /** Send a message, optionally with HTML parse mode and an inline keyboard. */
+  sendMessage(chatId: number, text: string, parseMode?: 'HTML', replyMarkup?: InlineKeyboardMarkup): Promise<TelegramMessage>
+  /** Edit a message's text and optional inline keyboard. */
+  editMessageText(chatId: number, messageId: number, text: string, replyMarkup?: InlineKeyboardMarkup): Promise<TelegramMessage>
+  /** Acknowledge an inline-keyboard press so Telegram stops the loading state. */
+  answerCallbackQuery(callbackQueryId: string, text?: string): Promise<boolean>
   /** Send a chat action such as `typing`. */
   sendChatAction(chatId: number, action: string): Promise<boolean>
   /** Replace the default, unlocalized Command Menu. */
@@ -151,23 +176,53 @@ export class TelegramClient implements TelegramClientLike {
   getUpdates(offset?: number): Promise<TelegramUpdate[]> {
     const body: Record<string, unknown> = {
       timeout: this.pollingTimeoutSec,
-      allowed_updates: ['message'],
+      allowed_updates: ['message', 'callback_query'],
     }
     if (offset !== undefined) body.offset = offset
     return this.call<TelegramUpdate[]>('getUpdates', body)
   }
 
   /**
-   * Send a text message, optionally with HTML parse mode.
+   * Send a text message, optionally with HTML parse mode and an inline keyboard.
    * @param chatId - target chat id.
    * @param text - the message text.
    * @param parseMode - `HTML` when the text is Telegram-HTML, else plain text.
+   * @param replyMarkup - inline keyboard to attach under the message.
    * @returns the delivered message object.
    */
-  sendMessage(chatId: number, text: string, parseMode?: 'HTML'): Promise<TelegramMessage> {
+  sendMessage(chatId: number, text: string, parseMode?: 'HTML', replyMarkup?: InlineKeyboardMarkup): Promise<TelegramMessage> {
     const body: Record<string, unknown> = { chat_id: chatId, text }
     if (parseMode !== undefined) body.parse_mode = parseMode
+    if (replyMarkup !== undefined) body.reply_markup = replyMarkup
     return this.call<TelegramMessage>('sendMessage', body)
+  }
+
+  /**
+   * Replace a message's text and optional inline keyboard. Omit `replyMarkup`
+   * or pass an empty keyboard to strip buttons.
+   * @param chatId - target chat id.
+   * @param messageId - the message to edit.
+   * @param text - the new message text.
+   * @param replyMarkup - replacement inline keyboard; empty removes buttons.
+   * @returns the edited message object.
+   */
+  editMessageText(chatId: number, messageId: number, text: string, replyMarkup?: InlineKeyboardMarkup): Promise<TelegramMessage> {
+    const body: Record<string, unknown> = { chat_id: chatId, message_id: messageId, text }
+    if (replyMarkup !== undefined) body.reply_markup = replyMarkup
+    return this.call<TelegramMessage>('editMessageText', body)
+  }
+
+  /**
+   * Acknowledge a callback query. Telegram keeps the button spinner until this
+   * succeeds; `text` is shown as a brief toast when provided.
+   * @param callbackQueryId - the query id from the update.
+   * @param text - optional toast shown to the user who pressed the button.
+   * @returns whether the acknowledgement was accepted.
+   */
+  answerCallbackQuery(callbackQueryId: string, text?: string): Promise<boolean> {
+    const body: Record<string, unknown> = { callback_query_id: callbackQueryId }
+    if (text !== undefined) body.text = text
+    return this.call<boolean>('answerCallbackQuery', body)
   }
 
   /**

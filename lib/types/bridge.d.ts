@@ -24,7 +24,10 @@ export interface TelegramBridgeOptions {
     maxMessageLength?: number;
     /** Long-polling timeout in seconds. */
     pollingTimeoutSec?: number;
-    /** Agent working directory. */
+    /**
+     * Unused at runtime. Kept so existing profiles that set `cwd` still load.
+     * Session working directories come from the Workspace the chat selects.
+     */
     cwd?: string;
     /** Deployment agent preset id each created agent joins (default when unset). */
     preset?: string;
@@ -50,11 +53,13 @@ export declare class TelegramBridge {
     private readonly provider;
     private readonly model;
     private readonly maxMessageLength;
-    private readonly cwd;
     private readonly preset;
     private readonly initAdminUserIds;
     private readonly sleep;
     private readonly chats;
+    /** Parked sessions keyed by `chatId:workspaceId`; switching away does not dispose them. */
+    private readonly parked;
+    private readonly bindings;
     private offset;
     private stopped;
     private errorCount;
@@ -62,7 +67,7 @@ export declare class TelegramBridge {
     /**
      * @param ctx - Cordis context providing `agents` and `agentPresets`
      * (declared by the plugin's `inject`) and the session/event stream.
-     * `workspaceRegistry` is optional and best-effort.
+     * `workspaceRegistry` is optional; without it `/start` cannot list Workspaces.
      * @param options - bridge options.
      */
     constructor(ctx: Context, options: TelegramBridgeOptions);
@@ -72,7 +77,8 @@ export declare class TelegramBridge {
     stop(): Promise<void>;
     private pollLoop;
     private handleUpdate;
-    private authorized;
+    private authorizedFrom;
+    private handleCallbackQuery;
     private handleCommand;
     /**
      * Resolve the deployment agent preset and the setup that joins it, so the
@@ -80,13 +86,33 @@ export declare class TelegramBridge {
      * layer. Mirrors dsh-host-apiproxy's composeAgent for the web surface.
      */
     private composeAgent;
+    private registry;
+    private listWorkspaces;
+    private lookupWorkspace;
+    private sendWorkspacePicker;
     /**
-     * Attach the session to the workspace for the bridge's cwd, so the chat
-     * shows under the right group in the harness GUI instead of [未分组].
-     * Best-effort: bookkeeping must never block message delivery.
+     * Bind this chat to `workspace`. Selecting the same Workspace keeps the
+     * current session. Selecting one this chat already used restores that
+     * parked session. A first pick for that Workspace opens a new session,
+     * attaches it, and welcomes the user. The previous session stays live
+     * under its Workspace; only `/clear` and process stop dispose it.
+     */
+    private bindWorkspace;
+    private rememberBinding;
+    private parkKey;
+    /** Park the chat's current session so a later pick can restore it. */
+    private parkCurrent;
+    /** Replace the chat's session, keeping the bound Workspace. */
+    private rotateChat;
+    private openChat;
+    /**
+     * Attach the session to the chosen Workspace so the chat shows under that
+     * group in the harness GUI instead of [未分组]. Failures are reported to
+     * the caller; the session remains usable.
      */
     private attachWorkspace;
-    private ensureChat;
+    private stripButtons;
+    private safeAnswer;
     private handleSessionEvent;
     private chatFor;
     private deliver;

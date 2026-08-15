@@ -13,7 +13,15 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { TelegramClient } from './client.js'
-import type { BotCommand, TelegramClientLike, TelegramMessage, TelegramUpdate } from './client.js'
+import type {
+  BotCommand,
+  InlineKeyboardMarkup,
+  TelegramCallbackQuery,
+  TelegramClientLike,
+  TelegramMessage,
+  TelegramUpdate,
+  TelegramUser,
+} from './client.js'
 import { markdownToHtml, splitMessage } from './format.js'
 
 /** Options for {@link TelegramBridge}. */
@@ -32,7 +40,10 @@ export interface TelegramBridgeOptions {
   maxMessageLength?: number
   /** Long-polling timeout in seconds. */
   pollingTimeoutSec?: number
-  /** Agent working directory. */
+  /**
+   * Unused at runtime. Kept so existing profiles that set `cwd` still load.
+   * Session working directories come from the Workspace the chat selects.
+   */
   cwd?: string
   /** Deployment agent preset id each created agent joins (default when unset). */
   preset?: string
@@ -51,17 +62,46 @@ interface ChatSession {
   handle: AgentHandle
   /** Current session id; `/clear` rotates it. */
   sessionId: string
+  /** Workspace this session was created under. */
+  readonly workspaceId: string
+}
+
+/** In-memory Workspace choice for one Telegram chat. Lost on process restart. */
+interface ChatBinding {
+  readonly workspaceId: string
+  readonly path: string
+  readonly title: string
+}
+
+/** Runtime slice of `workspaceRegistry` used by the picker and attach path. */
+interface WorkspaceLike {
+  readonly id: string
+  readonly path: string
+  readonly title: string
+  attachSession(id: string): Promise<void>
+}
+
+interface WorkspaceRegistryLike {
+  list(): WorkspaceLike[]
+  get(id: string): WorkspaceLike | undefined
 }
 
 const WELCOME_TEXT = 'Hello! I am the DeepSeek Harness agent. Send me a message or /help for commands.'
 const HELP_TEXT = [
-  '/start — start a session',
+  '/start — choose a workspace and start a session',
   '/clear — reset the current session',
   '/help — show this help',
 ].join('\n')
+const CHOOSE_WORKSPACE_TEXT = 'Choose a workspace first with /start.'
+const NO_WORKSPACE_TEXT = 'No workspaces are available. Create one in DeepSeek Harness first.'
+const WORKSPACE_GONE_TEXT = 'That workspace is no longer available.'
+const ATTACH_FAILED_TEXT = 'The session could not be attached to this workspace. It is still available.'
+const PICKER_INTRO = 'Choose a workspace.'
+const WORKSPACE_CALLBACK_PREFIX = 'ws:'
+const BUTTON_TEXT_MAX = 64
 
 const COMMAND_MENU: readonly BotCommand[] = [
-  { command: 'start', description: 'start a session' },
+  { command: 'start', description: 'choose a workspace and start a session' },
   { command: 'clear', description: 'reset the current session' },
   { command: 'help', description: 'show this help' },
 ]
@@ -69,6 +109,41 @@ const COMMAND_MENU: readonly BotCommand[] = [
 // Floor between polls so an instant-empty transport cannot hot-loop the
 // event loop; real long polling already blocks for the polling timeout.
 const POLL_CADENCE_MS = 50
+
+/** Display title; empty titles fall back to the last path segment. */
+function workspaceLabel(workspace: { title: string, path: string }): string {
+  const title = workspace.title.trim()
+  if (title !== '') return title
+  const base = workspace.path.replace(/[\\/]+$/, '').split(/[\\/]/).filter(part => part !== '').pop()
+  return base !== undefined && base !== '' ? base : workspace.path
+}
+
+/** Inline-keyboard label; current Workspace is marked and text is capped at 64. */
+function buttonText(label: string, current: boolean): string {
+  const marked = current ? `✓ ${label}` : label
+  if (marked.length <= BUTTON_TEXT_MAX) return marked
+  return `${marked.slice(0, BUTTON_TEXT_MAX - 1)}…`
+}
+
+/** Confirmation after a Workspace pick. */
+function usingWorkspaceText(workspace: { title: string, path: string }): string {
+  return `Using workspace: ${workspaceLabel(workspace)}\n${workspace.path}`
+}
+
+/** Picker body: titles live on the buttons; path is confirmed after a pick. */
+function pickerText(): string {
+  return PICKER_INTRO
+}
+
+/** One button per row; callback data is `ws:` plus the Workspace id. */
+function pickerMarkup(workspaces: readonly WorkspaceLike[], currentId?: string): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: workspaces.map(workspace => [{
+      text: buttonText(workspaceLabel(workspace), currentId === String(workspace.id)),
+      callback_data: `${WORKSPACE_CALLBACK_PREFIX}${String(workspace.id)}`,
+    }]),
+  }
+}
 
 /** Extract the concatenated text blocks of an assistant message. */
 function assistantText(event: Extract<SessionEvent, { type: 'assistant/message' }>): string | undefined {
@@ -113,11 +188,13 @@ export class TelegramBridge {
   private readonly provider: string
   private readonly model: string
   private readonly maxMessageLength: number
-  private readonly cwd: string
   private readonly preset: string | undefined
   private readonly initAdminUserIds: number[]
   private readonly sleep: (ms: number) => Promise<void>
   private readonly chats = new Map<string, ChatSession>()
+  /** Parked sessions keyed by `chatId:workspaceId`; switching away does not dispose them. */
+  private readonly parked = new Map<string, ChatSession>()
+  private readonly bindings = new Map<string, ChatBinding>()
   private offset: number | undefined
   private stopped = false
   private errorCount = 0
@@ -126,7 +203,7 @@ export class TelegramBridge {
   /**
    * @param ctx - Cordis context providing `agents` and `agentPresets`
    * (declared by the plugin's `inject`) and the session/event stream.
-   * `workspaceRegistry` is optional and best-effort.
+   * `workspaceRegistry` is optional; without it `/start` cannot list Workspaces.
    * @param options - bridge options.
    */
   constructor(ctx: Context, options: TelegramBridgeOptions) {
@@ -139,7 +216,6 @@ export class TelegramBridge {
     this.provider = options.provider ?? 'deepseek-official'
     this.model = options.model ?? 'deepseek-v4-flash'
     this.maxMessageLength = options.maxMessageLength ?? 4096
-    this.cwd = options.cwd ?? process.cwd()
     this.preset = options.preset
     this.initAdminUserIds = options.initAdminUserIds ?? []
     this.sleep = options.sleep ?? ((ms: number) => new Promise(resolve => setTimeout(resolve, ms)))
@@ -161,8 +237,10 @@ export class TelegramBridge {
       this.disposeEvents()
       this.disposeEvents = undefined
     }
-    const agents = [...this.chats.values()].map(entry => entry.handle)
+    const agents = [...this.chats.values(), ...this.parked.values()].map(entry => entry.handle)
     this.chats.clear()
+    this.parked.clear()
+    this.bindings.clear()
     await Promise.allSettled(agents.map(handle => handle.dispose()))
   }
 
@@ -212,10 +290,14 @@ export class TelegramBridge {
   }
 
   private async handleUpdate(update: TelegramUpdate): Promise<void> {
+    if (update.callback_query !== undefined) {
+      await this.handleCallbackQuery(update.callback_query)
+      return
+    }
     const message = update.message
     if (message === undefined) return
     if (message.text === undefined) return
-    if (!this.authorized(message)) {
+    if (!this.authorizedFrom(message.from)) {
       await this.safeSend(message.chat.id, 'Access denied.')
       return
     }
@@ -223,24 +305,49 @@ export class TelegramBridge {
       await this.handleCommand(message.chat.id, message.text, message.from?.id)
       return
     }
-    const chat = await this.ensureChat(message.chat.id)
+    const chat = this.chats.get(String(message.chat.id))
+    if (chat === undefined) {
+      await this.safeSend(message.chat.id, CHOOSE_WORKSPACE_TEXT)
+      return
+    }
     chat.handle.agent.followup(createUserMessage({
       content: [{ type: 'text', text: message.text }],
       source: { kind: 'user' },
     }))
   }
 
-  private authorized(message: TelegramMessage): boolean {
+  private authorizedFrom(from?: TelegramUser): boolean {
     if (this.allowAllUsers) return true
-    return message.from !== undefined && this.allowedUserIds.includes(message.from.id)
+    return from !== undefined && this.allowedUserIds.includes(from.id)
+  }
+
+  private async handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> {
+    if (!this.authorizedFrom(query.from)) {
+      await this.safeAnswer(query.id, 'Access denied.')
+      return
+    }
+    await this.safeAnswer(query.id)
+    const message = query.message
+    if (message === undefined) return
+    await this.stripButtons(message)
+    const data = query.data
+    if (data === undefined || !data.startsWith(WORKSPACE_CALLBACK_PREFIX)) return
+    const workspaceId = data.slice(WORKSPACE_CALLBACK_PREFIX.length)
+    const chatId = message.chat.id
+    const workspace = this.lookupWorkspace(workspaceId)
+    if (workspace === undefined) {
+      await this.safeSend(chatId, WORKSPACE_GONE_TEXT)
+      await this.sendWorkspacePicker(chatId)
+      return
+    }
+    await this.bindWorkspace(chatId, workspace)
   }
 
   private async handleCommand(chatId: number, text: string, fromId?: number): Promise<void> {
     const command = text.split(/\s+/)[0] as string
     switch (command) {
       case '/start':
-        await this.ensureChat(chatId)
-        await this.safeSend(chatId, WELCOME_TEXT)
+        await this.sendWorkspacePicker(chatId)
         break
       case '/init':
         if (fromId === undefined || !this.initAdminUserIds.includes(fromId)) {
@@ -256,20 +363,22 @@ export class TelegramBridge {
         }
         break
       case '/clear': {
-        const chat = await this.ensureChat(chatId)
-        const previous = chat.handle
-        const sessionId = SessionId(`telegram:${chatId}:${Date.now()}`)
-        const composition = await this.composeAgent()
-        const handle = await this.ctx.agents.create({
-          sessionId,
-          meta: { cwd: this.cwd, ...(composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset }) },
-          agentOptions: { provider: this.provider, model: this.model },
-          setup: composition.setup,
-        })
-        void this.attachWorkspace(String(sessionId))
-        chat.handle = handle
-        chat.sessionId = String(sessionId)
-        await previous.dispose()
+        const binding = this.bindings.get(String(chatId))
+        if (binding === undefined) {
+          await this.safeSend(chatId, CHOOSE_WORKSPACE_TEXT)
+          break
+        }
+        const workspace = this.lookupWorkspace(binding.workspaceId)
+        if (workspace === undefined) {
+          this.bindings.delete(String(chatId))
+          const previous = this.chats.get(String(chatId))
+          this.chats.delete(String(chatId))
+          if (previous !== undefined) await previous.handle.dispose()
+          await this.safeSend(chatId, WORKSPACE_GONE_TEXT)
+          await this.sendWorkspacePicker(chatId)
+          break
+        }
+        await this.rotateChat(chatId, workspace)
         await this.safeSend(chatId, 'Started a fresh session.')
         break
       }
@@ -304,41 +413,169 @@ export class TelegramBridge {
     }
   }
 
-  /**
-   * Attach the session to the workspace for the bridge's cwd, so the chat
-   * shows under the right group in the harness GUI instead of [未分组].
-   * Best-effort: bookkeeping must never block message delivery.
-   */
-  private async attachWorkspace(sessionId: string): Promise<void> {
-    const registry = this.ctx.get('workspaceRegistry') as {
-      resolveByPath(path: string): Promise<{ attachSession(id: string): Promise<void> } | undefined>
-      create(path: string): Promise<{ attachSession(id: string): Promise<void> }>
-    } | undefined
-    if (registry === undefined) return
+  private registry(): WorkspaceRegistryLike | undefined {
+    return this.ctx.get('workspaceRegistry') as WorkspaceRegistryLike | undefined
+  }
+
+  private listWorkspaces(): WorkspaceLike[] | undefined {
+    const registry = this.registry()
+    if (registry === undefined) return undefined
     try {
-      const workspace = await registry.resolveByPath(this.cwd) ?? await registry.create(this.cwd)
-      await workspace.attachSession(sessionId)
+      return registry.list()
     } catch (error) {
-      this.ctx.logger.warn('[telegram] workspace attach failed for %s: %s', sessionId, messageOf(error))
+      this.ctx.logger.warn('[telegram] workspace list failed: %s', messageOf(error))
+      return undefined
     }
   }
 
-  private async ensureChat(chatId: number): Promise<ChatSession> {
+  private lookupWorkspace(id: string): WorkspaceLike | undefined {
+    const registry = this.registry()
+    if (registry === undefined) return undefined
+    try {
+      return registry.get(id)
+    } catch (error) {
+      this.ctx.logger.warn('[telegram] workspace get failed: %s', messageOf(error))
+      return undefined
+    }
+  }
+
+  private async sendWorkspacePicker(chatId: number): Promise<void> {
+    const workspaces = this.listWorkspaces()
+    if (workspaces === undefined || workspaces.length === 0) {
+      await this.safeSend(chatId, NO_WORKSPACE_TEXT)
+      return
+    }
+    const currentId = this.bindings.get(String(chatId))?.workspaceId
+    const text = pickerText()
+    const markup = pickerMarkup(workspaces, currentId)
+    try {
+      await this.client.sendMessage(chatId, text, undefined, markup)
+    } catch (error) {
+      this.ctx.logger.error('[telegram] delivery failed: %s', messageOf(error))
+    }
+  }
+
+  /**
+   * Bind this chat to `workspace`. Selecting the same Workspace keeps the
+   * current session. Selecting one this chat already used restores that
+   * parked session. A first pick for that Workspace opens a new session,
+   * attaches it, and welcomes the user. The previous session stays live
+   * under its Workspace; only `/clear` and process stop dispose it.
+   */
+  private async bindWorkspace(chatId: number, workspace: WorkspaceLike): Promise<void> {
     const key = String(chatId)
+    const workspaceId = String(workspace.id)
     const existing = this.chats.get(key)
-    if (existing !== undefined) return existing
-    const sessionId = SessionId(`telegram:${key}`)
+    if (existing !== undefined && existing.workspaceId === workspaceId) {
+      this.rememberBinding(chatId, workspace)
+      await this.safeSend(chatId, usingWorkspaceText(workspace))
+      return
+    }
+    const restored = this.parked.get(this.parkKey(chatId, workspaceId))
+    if (restored !== undefined) {
+      this.parkCurrent(chatId)
+      this.parked.delete(this.parkKey(chatId, workspaceId))
+      this.chats.set(key, restored)
+      this.rememberBinding(chatId, workspace)
+      await this.safeSend(chatId, usingWorkspaceText(workspace))
+      return
+    }
+    this.parkCurrent(chatId)
+    const opened = await this.openChat(chatId, workspace)
+    this.rememberBinding(chatId, workspace)
+    this.chats.set(key, opened.session)
+    await this.safeSend(chatId, usingWorkspaceText(workspace))
+    if (!opened.attached) await this.safeSend(chatId, ATTACH_FAILED_TEXT)
+    await this.safeSend(chatId, WELCOME_TEXT)
+  }
+
+  private rememberBinding(chatId: number, workspace: WorkspaceLike): void {
+    this.bindings.set(String(chatId), {
+      workspaceId: String(workspace.id),
+      path: workspace.path,
+      title: workspaceLabel(workspace),
+    })
+  }
+
+  private parkKey(chatId: number, workspaceId: string): string {
+    return `${chatId}:${workspaceId}`
+  }
+
+  /** Park the chat's current session so a later pick can restore it. */
+  private parkCurrent(chatId: number): void {
+    const current = this.chats.get(String(chatId))
+    if (current === undefined) return
+    this.parked.set(this.parkKey(chatId, current.workspaceId), current)
+  }
+
+  /** Replace the chat's session, keeping the bound Workspace. */
+  private async rotateChat(chatId: number, workspace: WorkspaceLike): Promise<void> {
+    const key = String(chatId)
+    const previous = this.chats.get(key)
+    const opened = await this.openChat(chatId, workspace)
+    this.chats.set(key, opened.session)
+    if (previous !== undefined) await previous.handle.dispose()
+    if (!opened.attached) await this.safeSend(chatId, ATTACH_FAILED_TEXT)
+  }
+
+  private async openChat(chatId: number, workspace: WorkspaceLike): Promise<{
+    session: ChatSession
+    attached: boolean
+  }> {
+    const sessionId = SessionId(`telegram:${chatId}:${Date.now()}`)
     const composition = await this.composeAgent()
     const handle = await this.ctx.agents.create({
       sessionId,
-      meta: { cwd: this.cwd, ...(composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset }) },
+      meta: { cwd: workspace.path, ...(composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset }) },
       agentOptions: { provider: this.provider, model: this.model },
       setup: composition.setup,
     })
-    const entry: ChatSession = { chatId, handle, sessionId: String(sessionId) }
-    this.chats.set(key, entry)
-    void this.attachWorkspace(String(sessionId))
-    return entry
+    const attached = await this.attachWorkspace(String(sessionId), workspace)
+    return {
+      session: {
+        chatId,
+        handle,
+        sessionId: String(sessionId),
+        workspaceId: String(workspace.id),
+      },
+      attached,
+    }
+  }
+
+  /**
+   * Attach the session to the chosen Workspace so the chat shows under that
+   * group in the harness GUI instead of [未分组]. Failures are reported to
+   * the caller; the session remains usable.
+   */
+  private async attachWorkspace(sessionId: string, workspace: WorkspaceLike): Promise<boolean> {
+    try {
+      await workspace.attachSession(sessionId)
+      return true
+    } catch (error) {
+      this.ctx.logger.warn('[telegram] workspace attach failed for %s: %s', sessionId, messageOf(error))
+      return false
+    }
+  }
+
+  private async stripButtons(message: TelegramMessage): Promise<void> {
+    try {
+      await this.client.editMessageText(
+        message.chat.id,
+        message.message_id,
+        message.text ?? PICKER_INTRO,
+        { inline_keyboard: [] },
+      )
+    } catch (error) {
+      this.ctx.logger.warn('[telegram] editMessageText failed: %s', messageOf(error))
+    }
+  }
+
+  private async safeAnswer(callbackQueryId: string, text?: string): Promise<void> {
+    try {
+      await this.client.answerCallbackQuery(callbackQueryId, text)
+    } catch (error) {
+      this.ctx.logger.warn('[telegram] answerCallbackQuery failed: %s', messageOf(error))
+    }
   }
 
   private handleSessionEvent(session: Session, event: SessionEvent): void {
@@ -360,6 +597,9 @@ export class TelegramBridge {
 
   private chatFor(session: Session): ChatSession | undefined {
     for (const entry of this.chats.values()) {
+      if (entry.sessionId === session.id) return entry
+    }
+    for (const entry of this.parked.values()) {
       if (entry.sessionId === session.id) return entry
     }
     return undefined

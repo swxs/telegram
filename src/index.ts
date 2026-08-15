@@ -21,7 +21,7 @@ export * from './format.js'
 export const name = 'telegram'
 // `agents` creates sessions; `agentPresets` mounts the tool catalog. Missing
 // presets fail at load (zero-tool agents look alive but cannot work).
-// `workspaceRegistry` is optional and resolved at runtime.
+// `workspaceRegistry` is optional; without it `/start` cannot list Workspaces.
 export const inject = ['agents', 'agentPresets']
 
 /** Telegram bridge deployment config. */

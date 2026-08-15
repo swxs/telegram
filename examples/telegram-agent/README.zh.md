@@ -28,7 +28,7 @@ telegram 一行挂载的是本仓库的构建产物（相对本配置的 `../../
 | `DSH_SESSION_ROOT` | JSONL 轨迹目录 |
 | `DSH_SYSTEM_PROMPT` | 部署提供的编码 persona |
 
-未配置白名单时 bot 拒绝所有用户（fail closed）。命令：`/start`、`/clear`（重置会话）、`/help`。
+未配置白名单时 bot 拒绝所有用户（fail closed）。命令：`/start`（选择 Workspace 并开始会话）、`/clear`（在已绑定 Workspace 下重置会话）、`/help`。
 
 ## 运行
 
