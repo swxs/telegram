@@ -15,7 +15,7 @@ describe('dsh-telegram plugin export shape', () => {
     const unwrapped = loader.unwrapExports(telegram) as Record<string, unknown>
     expect(unwrapped).toBe(telegram)
     expect(unwrapped.name).toBe('telegram')
-    expect(unwrapped.inject).toEqual(['agents'])
+    expect(unwrapped.inject).toEqual(['agents', 'agentPresets'])
     expect(unwrapped.Config).toBeDefined()
     expect(typeof unwrapped.apply).toBe('function')
   })

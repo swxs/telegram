@@ -19,9 +19,10 @@ export * from './client.js'
 export * from './format.js'
 
 export const name = 'telegram'
-// Only the agent factory is required; the surrounding composition supplies
-// the LLM adapter, sessions, and tools.
-export const inject = ['agents']
+// `agents` creates sessions; `agentPresets` mounts the tool catalog. Missing
+// presets fail at load (zero-tool agents look alive but cannot work).
+// `workspaceRegistry` is optional and resolved at runtime.
+export const inject = ['agents', 'agentPresets']
 
 /** Telegram bridge deployment config. */
 export interface TelegramConfig extends Omit<TelegramBridgeOptions, 'token'> {
@@ -46,13 +47,17 @@ export const Config: Schema<TelegramConfig> = Schema.object({
 /**
  * Start the Telegram bridge. Missing tokens fail loudly at load; polling and
  * session delivery run for as long as the plugin's fiber lives.
- * @param ctx - Cordis context; `agents` is injected by the plugin declaration.
+ * @param ctx - Cordis context; `agents` and `agentPresets` are injected by
+ * the plugin declaration.
  * @param config - deployment config.
  */
 export function apply(ctx: Context, config: TelegramConfig): void {
   const token = config.token === '' ? process.env.DSH_TELEGRAM_TOKEN : config.token
   if (token === undefined || token === '') {
     throw new Error('telegram: missing bot token (set config.token or DSH_TELEGRAM_TOKEN)')
+  }
+  if (ctx.get('agentPresets') === undefined) {
+    throw new Error('telegram: missing agentPresets (the composition must provide the agent preset service)')
   }
   const bridge = new TelegramBridge(ctx, { ...config, token })
   ctx.effect(() => {

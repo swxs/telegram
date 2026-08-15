@@ -25,7 +25,8 @@ export declare const Config: Schema<TelegramConfig>;
 /**
  * Start the Telegram bridge. Missing tokens fail loudly at load; polling and
  * session delivery run for as long as the plugin's fiber lives.
- * @param ctx - Cordis context; `agents` is injected by the plugin declaration.
+ * @param ctx - Cordis context; `agents` and `agentPresets` are injected by
+ * the plugin declaration.
  * @param config - deployment config.
  */
 export declare function apply(ctx: Context, config: TelegramConfig): void;

@@ -49,6 +49,7 @@ export declare class TelegramBridge {
     private readonly model;
     private readonly maxMessageLength;
     private readonly cwd;
+    private readonly preset;
     private readonly sleep;
     private readonly chats;
     private offset;
@@ -56,8 +57,9 @@ export declare class TelegramBridge {
     private errorCount;
     private disposeEvents;
     /**
-     * @param ctx - Cordis context providing `agents` (declared by the plugin's
-     * `inject`) and the session/event stream.
+     * @param ctx - Cordis context providing `agents` and `agentPresets`
+     * (declared by the plugin's `inject`) and the session/event stream.
+     * `workspaceRegistry` is optional and best-effort.
      * @param options - bridge options.
      */
     constructor(ctx: Context, options: TelegramBridgeOptions);
@@ -69,6 +71,18 @@ export declare class TelegramBridge {
     private handleUpdate;
     private authorized;
     private handleCommand;
+    /**
+     * Resolve the deployment agent preset and the setup that joins it, so the
+     * bot's agents carry the full tool catalog instead of the empty global
+     * layer. Mirrors dsh-host-apiproxy's composeAgent for the web surface.
+     */
+    private composeAgent;
+    /**
+     * Attach the session to the workspace for the bridge's cwd, so the chat
+     * shows under the right group in the harness GUI instead of [未分组].
+     * Best-effort: bookkeeping must never block message delivery.
+     */
+    private attachWorkspace;
     private ensureChat;
     private handleSessionEvent;
     private chatFor;

@@ -74,6 +74,23 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+/** True when the value looks like a Telegram update envelope (has a numeric id). */
+function isUpdate(value: unknown): value is TelegramUpdate {
+  return value !== null && typeof value === 'object' && typeof (value as { update_id?: unknown }).update_id === 'number'
+}
+
+/** A short, safe description of a malformed response value for logging. */
+function shapeOf(value: unknown): string {
+  if (value === null) return 'null'
+  if (typeof value !== 'object' && typeof value !== 'string') return typeof value
+  try {
+    const text = JSON.stringify(value)
+    return text === undefined ? typeof value : text.length > 120 ? `${text.slice(0, 120)}…` : text
+  } catch {
+    return typeof value
+  }
+}
+
 /**
  * Bridge between Telegram chats and harness agent sessions. One agent
  * session per chat; incoming text becomes a user message via `followup`,
@@ -99,8 +116,9 @@ export class TelegramBridge {
   private disposeEvents: (() => void) | undefined
 
   /**
-   * @param ctx - Cordis context providing `agents` (declared by the plugin's
-   * `inject`) and the session/event stream.
+   * @param ctx - Cordis context providing `agents` and `agentPresets`
+   * (declared by the plugin's `inject`) and the session/event stream.
+   * `workspaceRegistry` is optional and best-effort.
    * @param options - bridge options.
    */
   constructor(ctx: Context, options: TelegramBridgeOptions) {
@@ -151,15 +169,36 @@ export class TelegramBridge {
         await this.sleep(Math.min(1000 * this.errorCount, 10000))
         continue
       }
-      for (const update of updates) {
-        this.offset = update.update_id + 1
-        try {
-          await this.handleUpdate(update)
-        } catch (error) {
-          this.ctx.logger.error('[telegram] update %d failed: %s', update.update_id, messageOf(error))
+      // `stop()` may have run while the request was in flight; drop the batch
+      // instead of creating sessions or sending messages after teardown.
+      if (this.stopped) return
+      try {
+        // The client trusts the API's `ok` flag and passes `result` through
+        // unchecked; a 200 with a malformed body (direct or via a proxy) can
+        // yield null/undefined/non-array and must not escape the loop.
+        if (!Array.isArray(updates)) {
+          this.ctx.logger.warn('[telegram] malformed getUpdates response (expected array, got %s)', shapeOf(updates))
+          await this.sleep(POLL_CADENCE_MS)
+          continue
         }
+        for (const update of updates) {
+          if (this.stopped) break
+          if (!isUpdate(update)) {
+            this.ctx.logger.warn('[telegram] skipped malformed update in batch: %s', shapeOf(update))
+            continue
+          }
+          this.offset = update.update_id + 1
+          try {
+            await this.handleUpdate(update)
+          } catch (error) {
+            this.ctx.logger.error('[telegram] update %d failed: %s', update.update_id, messageOf(error))
+          }
+        }
+        if (updates.length === 0) await this.sleep(POLL_CADENCE_MS)
+      } catch (error) {
+        this.ctx.logger.error('[telegram] polling iteration failed: %s', messageOf(error))
+        continue
       }
-      if (updates.length === 0) await this.sleep(POLL_CADENCE_MS)
     }
   }
 
@@ -234,7 +273,9 @@ export class TelegramBridge {
       resolve(id?: string): Promise<{ id: string }>
       mount(ctx: Context, id: string): Promise<void>
     } | undefined
-    if (presets === undefined) return { setup: undefined }
+    if (presets === undefined) {
+      throw new Error('telegram: missing agentPresets (the composition must provide the agent preset service)')
+    }
     const id = (await presets.resolve(this.preset)).id
     return {
       agentPreset: id,

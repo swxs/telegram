@@ -11,7 +11,7 @@ dsh --profile web --dump-config | grep telegram
 
 - 插入行 id：`telegram`（cordis.patch.yml）；不声明模型面工具或技能——它是把 Telegram 聊天桥接到 agent 会话的后台服务插件。
 - **加载即需要 token**：缺少 bot token（配置 `token` 或环境变量 `DSH_TELEGRAM_TOKEN`）时 `apply` 直接报错；没有 token 不会惰性启动。
-- **宿主前置条件**：dsh 组合必须挂载 `agents` 服务（`@deepseek-ai/dsh-agent`）；LLM 适配器、会话与工具来自外围 `cordis.yml`（见 [`telegram-agent`](examples/telegram-agent/README.zh.md) 示例）。
+- **宿主前置条件**：dsh 组合必须挂载 `agents` 与 `agentPresets`（`@deepseek-ai/dsh-agent` 及部署预设服务）；LLM 适配器、会话来自外围 `cordis.yml`（见 [`telegram-agent`](examples/telegram-agent/README.zh.md) 示例）。缺少 `agentPresets` 时插件加载失败。
 - 卸载：`dsh plugin --profile web remove telegram`。
 - 安装后需重启目标 profile 的 DSH 进程（组合层变更不参与 HMR 热更新）。
 
@@ -21,7 +21,7 @@ dsh --profile web --dump-config | grep telegram
 
 ## 接线
 
-`inject: ['agents']`。每条已授权文本消息为每个聊天创建或复用 agent（`ctx.agents.create`），经 `followup` 以用户消息转发文本，并把每条 `assistant/message` 文本作为分片的 HTML 格式 Telegram 消息送回聊天。命令：`/start`（欢迎）、`/new` 与 `/clear`（新会话，旧 agent 释放）、`/help`。LLM 适配器、会话与工具来自外围 `cordis.yml`。
+`inject: ['agents', 'agentPresets']`。每条已授权文本消息为每个聊天创建或复用 agent（`ctx.agents.create`），经 `followup` 以用户消息转发文本，并把每条 `assistant/message` 文本作为分片的 HTML 格式 Telegram 消息送回聊天。创建 agent 时会 `agentPresets.mount()` 当前部署预设（web profile 默认为 `standard`），否则会话是零工具的。`workspaceRegistry` 可选：若存在，则按 `cwd` 把会话挂到对应工作区，避免 GUI 显示「未分组」；挂载失败只记日志，不挡住消息。命令：`/start`（欢迎）、`/new` 与 `/clear`（新会话，旧 agent 释放）、`/help`。LLM 适配器、会话来自外围 `cordis.yml`。缺少 `agentPresets` 时加载即失败。
 
 ## 配置
 
@@ -34,8 +34,10 @@ dsh --profile web --dump-config | grep telegram
 | `model` | `deepseek-v4-flash` | 传给每个创建 agent 的模型 id |
 | `maxMessageLength` | `4096` | 每条 Telegram 消息的长度上限 |
 | `pollingTimeoutSec` | `30` | 长轮询超时（秒） |
+| `cwd` | 进程 `cwd` | 每个 agent 会话的工作目录；也用于解析/创建 workspace 分组 |
+| `preset` | 组合默认预设 | 每个新建 agent 加入的 agent 预设 id；未设时走 `agentPresets.resolve()` 的默认 |
 
-缺少 token 时加载即报错（fail loud）。未配置白名单时 bot 拒绝所有用户（fail closed）。`TelegramConfig` 还接受仅运行时使用的 `client` 与 `sleep` 接缝供测试使用；生产环境使用全局 `fetch` 与真实定时器。所有错误经 `ctx.logger` 记录且 bot token 被脱敏。
+缺少 token 时加载即报错（fail loud）。缺少 `agentPresets` 服务时同样加载失败——零工具 agent 看起来像在聊，实际不能干活。未配置白名单时 bot 拒绝所有用户（fail closed）。`workspaceRegistry` 缺失或 `attachSession` 失败不会阻止插件加载或消息投递。`TelegramConfig` 还接受仅运行时使用的 `client` 与 `sleep` 接缝供测试使用；生产环境使用全局 `fetch` 与真实定时器。所有错误经 `ctx.logger` 记录且 bot token 被脱敏。
 
 ## 投递语义
 
