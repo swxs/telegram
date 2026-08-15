@@ -60,6 +60,15 @@ describe('TelegramClient', () => {
     expect(body).toMatchObject({ parse_mode: 'HTML' })
   })
 
+  it('sendMessage forwards copy_text buttons when provided', async () => {
+    const markup = { inline_keyboard: [[{ text: 'tdd', copy_text: { text: '//tdd ' } }]] }
+    const fetchImpl = fetchMock(async () => jsonResponse({ ok: true, result: { message_id: 1, chat: { id: 7, type: 'private' }, date: 0 } }))
+    const client = new TelegramClient('t:ok', { fetch: fetchImpl as typeof fetch })
+    await client.sendMessage(7, 'Choose a skill.', undefined, markup)
+    const body = JSON.parse((fetchImpl.mock.calls[0]?.[1] as RequestInit).body as string) as Record<string, unknown>
+    expect(body.reply_markup).toEqual(markup)
+  })
+
   it('sendMessage forwards an inline keyboard when provided', async () => {
     const markup = { inline_keyboard: [[{ text: 'obsidian', callback_data: 'ws:1' }]] }
     const fetchImpl = fetchMock(async () => jsonResponse({ ok: true, result: { message_id: 1, chat: { id: 7, type: 'private' }, date: 0 } }))
@@ -100,6 +109,7 @@ describe('TelegramClient', () => {
     const commands = [
       { command: 'start', description: 'choose a workspace and start a session' },
       { command: 'clear', description: 'reset the current session' },
+      { command: 'skills', description: 'choose a skill' },
       { command: 'help', description: 'show this help' },
     ]
     const fetchImpl = fetchMock(async () => jsonResponse({ ok: true, result: true }))

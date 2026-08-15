@@ -90,6 +90,13 @@ export declare class TelegramBridge {
     private listWorkspaces;
     private lookupWorkspace;
     private sendWorkspacePicker;
+    private sendSkillPicker;
+    /**
+     * List user-invocable Skill names for this Workspace. Web mounts
+     * `skill-filesystem` on the agent preset layer, so discovery needs the
+     * live agent as `scope`; an unscoped host `list({ cwd })` sees none.
+     */
+    private listSkillNames;
     /**
      * Bind this chat to `workspace`. Selecting the same Workspace keeps the
      * current session. Selecting one this chat already used restores that

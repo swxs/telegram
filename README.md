@@ -21,7 +21,7 @@ dsh --profile web --dump-config | grep telegram
 
 ## 接线
 
-`inject: ['agents', 'agentPresets']`。`/start` 列出 `workspaceRegistry` 中的 Workspace，用户用 Inline Keyboard 选择后，才为该聊天创建 agent（`ctx.agents.create`，`meta.cwd` 为所选 Workspace 的 path）并 `attachSession`。之后每条已授权文本消息复用该聊天的 agent，经 `followup` 以用户消息转发文本，并把每条 `assistant/message` 文本作为分片的 HTML 格式 Telegram 消息送回聊天。创建 agent 时会 `agentPresets.mount()` 当前部署预设（web profile 默认为 `standard`），否则会话是零工具的。`workspaceRegistry` 可选：缺失或列表为空时 `/start` 提示没有可选 Workspace，不建会话。`attachSession` 失败会告知用户，会话仍可用。命令：`/start`（选择 Workspace 并开始会话）、`/clear`（在已绑定 Workspace 下新开会话，旧 agent 释放）、`/help`。绑定只活在内存里，进程重启后需再 `/start`。LLM 适配器、会话来自外围 `cordis.yml`。缺少 `agentPresets` 时加载即失败。
+`inject: ['agents', 'agentPresets']`。`/start` 列出 `workspaceRegistry` 中的 Workspace，用户用 Inline Keyboard 选择后，才为该聊天创建 agent（`ctx.agents.create`，`meta.cwd` 为所选 Workspace 的 path）并 `attachSession`。之后每条已授权文本消息复用该聊天的 agent，经 `followup` 以用户消息转发文本，并把每条 `assistant/message` 文本作为分片的 HTML 格式 Telegram 消息送回聊天。创建 agent 时会 `agentPresets.mount()` 当前部署预设（web profile 默认为 `standard`），否则会话是零工具的。`workspaceRegistry` 可选：缺失或列表为空时 `/start` 提示没有可选 Workspace，不建会话。`attachSession` 失败会告知用户，会话仍可用。命令：`/start`（选择 Workspace 并开始会话）、`/clear`（在已绑定 Workspace 下新开会话，旧 agent 释放）、`/skills`（列出当前 Workspace 已加载的 Skill 名；点选复制 `//name `，粘贴后可改再发）、`/help`。绑定只活在内存里，进程重启后需再 `/start`。LLM 适配器、会话来自外围 `cordis.yml`。缺少 `agentPresets` 时加载即失败。
 
 ## 配置
 
@@ -53,7 +53,7 @@ dsh --profile web --dump-config | grep telegram
 
 #### 模型看到什么
 
-每条入站聊天消息，模型在该聊天会话中收到逐字的一条用户消息。本包不添加系统提示词或工具 schema；它们来自外围 `cordis.yml` 的插件。命令（`/start`、`/clear`、`/help`、`/init`）和 Workspace 选择回调查询不会到达模型。
+每条入站聊天消息，模型在该聊天会话中收到逐字的一条用户消息。本包不添加系统提示词或工具 schema；它们来自外围 `cordis.yml` 的插件。命令（`/start`、`/clear`、`/skills`、`/help`、`/init`）和 Workspace 选择回调查询不会到达模型。以 `//` 开头的 Skill 调用会改写成 `/` 后作为用户消息转发。其它未知 `/` 命令不会到达模型。
 
 #### Token 影响
 

@@ -8,6 +8,7 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 interface FakeAgent {
   session: { id: string }
   followup: ReturnType<typeof vi.fn>
+  ctx: { get: Mock }
 }
 
 interface FakeHandle {
@@ -66,6 +67,8 @@ interface HarnessSeams {
   agentPresets?: 'default' | 'missing'
   /** Default: two fake workspaces. `missing` omits the registry; `throwing` rejects attach; `empty` lists none. */
   workspaceRegistry?: 'default' | 'missing' | 'throwing' | 'empty'
+  /** Default: two user-invocable skills. `missing` omits the service; `empty` lists none; `many` is 21 names. */
+  skills?: 'default' | 'missing' | 'empty' | 'many'
 }
 
 /** Poll an async condition for up to five seconds. */
@@ -108,6 +111,22 @@ function createHarness(options: Partial<TelegramBridgeOptions> = {}, seams: Harn
   }
   if (seams.workspaceRegistry === 'throwing') {
     attachSession.mockRejectedValue(new Error('attach failed'))
+  }
+  const skillCatalog = [
+    { name: 'tdd', invocation: { userInvocable: true, modelInvocable: true } },
+    { name: 'code-review', invocation: { userInvocable: true, modelInvocable: true } },
+    { name: 'hidden', invocation: { userInvocable: false, modelInvocable: true } },
+  ]
+  const manySkills = Array.from({ length: 21 }, (_, i) => ({
+    name: `skill-${String(i).padStart(2, '0')}`,
+    invocation: { userInvocable: true, modelInvocable: true },
+  }))
+  const skills = {
+    list: vi.fn(async (_options?: { cwd?: string }) => {
+      if (seams.skills === 'empty') return []
+      if (seams.skills === 'many') return manySkills
+      return skillCatalog
+    }),
   }
   let listener: ((session: { id: string }, event: SessionEvent) => void) | undefined
   let menu: BotCommand[] = []
@@ -172,6 +191,7 @@ function createHarness(options: Partial<TelegramBridgeOptions> = {}, seams: Harn
           agent: {
             session: { id: opts.sessionId },
             followup: vi.fn(),
+            ctx: { get: (name: string) => ctx.get(name) },
           },
           dispose: vi.fn(),
         }
@@ -183,6 +203,7 @@ function createHarness(options: Partial<TelegramBridgeOptions> = {}, seams: Harn
     get: vi.fn((name: string) => {
       if (name === 'agentPresets') return seams.agentPresets === 'missing' ? undefined : presets
       if (name === 'workspaceRegistry') return seams.workspaceRegistry === 'missing' ? undefined : registry
+      if (name === 'skills') return seams.skills === 'missing' ? undefined : skills
       return undefined
     }),
   }
@@ -376,6 +397,7 @@ describe('TelegramBridge', () => {
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
     h.client.getUpdates.mockResolvedValueOnce([update({ text: '/help' })])
     await waitFor(() => h.sent.some(s => s.text.includes('/start')) ? true : undefined, 'help sent')
+    expect(h.sent[0]?.text).toContain('/skills')
     expect(h.sent[0]?.text).not.toContain('/init')
     expect(h.sent[0]?.text).not.toContain('/new')
   })
@@ -397,6 +419,7 @@ describe('TelegramBridge', () => {
     await expect(h.client.getMyCommands()).resolves.toEqual([
       { command: 'start', description: 'choose a workspace and start a session' },
       { command: 'clear', description: 'reset the current session' },
+      { command: 'skills', description: 'choose a skill' },
       { command: 'help', description: 'show this help' },
     ])
     expect(h.agents.length).toBe(0)
@@ -431,12 +454,48 @@ describe('TelegramBridge', () => {
     expect(h.ctx.logger.error.mock.calls.some((call: unknown[]) => String(call[0]).includes('setMyCommands failed'))).toBe(true)
   })
 
-  it('replies to unknown commands', async () => {
+  it('rewrites a //skill invoke and forwards /name to the agent', async () => {
     const h = createHarness()
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
-    h.client.getUpdates.mockResolvedValueOnce([update({ text: '/bogus' })])
-    await waitFor(() => h.sent.some(s => s.text.includes('Unknown command')) ? true : undefined, 'unknown reply')
+    await bindDefaultWorkspace(h)
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: '//code-review fix the tests', updateId: 2 })])
+    await waitFor(() => h.agents[0]?.agent.followup.mock.calls.length === 1 ? true : undefined, 'skill followup')
+    const message = h.agents[0]?.agent.followup.mock.calls[0]?.[0] as { content: { text: string }[] }
+    expect(message.content[0]?.text).toBe('/code-review fix the tests')
+  })
+
+  it('does not treat //start as the /start command', async () => {
+    const h = createHarness()
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    await bindDefaultWorkspace(h)
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: '//start', updateId: 2 })])
+    await waitFor(() => h.agents[0]?.agent.followup.mock.calls.length === 1 ? true : undefined, 'followup')
+    const message = h.agents[0]?.agent.followup.mock.calls[0]?.[0] as { content: { text: string }[] }
+    expect(message.content[0]?.text).toBe('/start')
+    expect(h.sent.some(s => s.text === 'Choose a workspace.')).toBe(false)
+  })
+
+  it('forwards a bare // token without rewriting', async () => {
+    const h = createHarness()
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    await bindDefaultWorkspace(h)
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: '// just text', updateId: 2 })])
+    await waitFor(() => h.agents[0]?.agent.followup.mock.calls.length === 1 ? true : undefined, 'followup')
+    const message = h.agents[0]?.agent.followup.mock.calls[0]?.[0] as { content: { text: string }[] }
+    expect(message.content[0]?.text).toBe('// just text')
+  })
+
+  it('treats a single-slash non-bridge command as unknown', async () => {
+    const h = createHarness()
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    await bindDefaultWorkspace(h)
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: '/code-review', updateId: 2 })])
+    await waitFor(() => h.sent.some(s => s.text.includes('Unknown command /code-review')) ? true : undefined, 'unknown reply')
+    expect(h.agents[0]?.agent.followup).not.toHaveBeenCalled()
   })
 
   it('delivers assistant text as split HTML messages', async () => {
@@ -841,5 +900,87 @@ describe('TelegramBridge', () => {
     await waitFor(() => h.answers.some(a => a.text === 'Access denied.') ? true : undefined, 'denied toast')
     expect(h.agents.length).toBe(0)
     expect(h.edits.length).toBe(0)
+  })
+
+  it('/skills without a binding prompts to choose a workspace', async () => {
+    const h = createHarness()
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: '/skills' })])
+    await waitFor(() => h.sent.some(s => s.text === 'Choose a workspace first with /start.') ? true : undefined, 'prompt sent')
+    expect(h.agents.length).toBe(0)
+  })
+
+  it('/skills lists user-invocable skill names that copy //name', async () => {
+    const h = createHarness()
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    await bindDefaultWorkspace(h)
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: '/skills@swxs_bot', updateId: 2 })])
+    await waitFor(() => h.sent.some(s => s.text === 'Choose a skill.') ? true : undefined, 'skill picker')
+    const picker = h.sent.findLast(s => s.text === 'Choose a skill.')
+    expect(picker?.replyMarkup?.inline_keyboard).toEqual([
+      [
+        { text: 'tdd', copy_text: { text: '//tdd ' } },
+        { text: 'code-review', copy_text: { text: '//code-review ' } },
+      ],
+    ])
+    const skills = h.ctx.get('skills') as { list: ReturnType<typeof vi.fn> }
+    expect(skills.list).toHaveBeenCalledWith({
+      cwd: 'D:\\codehouse\\obsidian',
+      scope: h.agents[0]?.agent,
+    })
+  })
+
+  it('/skills reports when no skills are available', async () => {
+    const h = createHarness({}, { skills: 'empty' })
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    await bindDefaultWorkspace(h)
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: '/skills', updateId: 2 })])
+    await waitFor(() => h.sent.some(s => s.text === 'No skills are available in this workspace.') ? true : undefined, 'empty notice')
+  })
+
+  it('/skills paginates 21 names two-across and edits on Next', async () => {
+    const h = createHarness({}, { skills: 'many' })
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    await bindDefaultWorkspace(h)
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: '/skills', updateId: 2 })])
+    await waitFor(() => h.sent.some(s => s.text === 'Choose a skill.') ? true : undefined, 'skill picker')
+    const first = h.sent.findLast(s => s.text === 'Choose a skill.')
+    const firstRows = first?.replyMarkup?.inline_keyboard ?? []
+    expect(firstRows).toHaveLength(11)
+    expect(firstRows[0]).toEqual([
+      { text: 'skill-00', copy_text: { text: '//skill-00 ' } },
+      { text: 'skill-01', copy_text: { text: '//skill-01 ' } },
+    ])
+    expect(firstRows[9]).toEqual([
+      { text: 'skill-18', copy_text: { text: '//skill-18 ' } },
+      { text: 'skill-19', copy_text: { text: '//skill-19 ' } },
+    ])
+    expect(firstRows[10]).toEqual([{ text: 'Next ›', callback_data: 'sk:1' }])
+    const editsBefore = h.edits.length
+    h.client.getUpdates.mockResolvedValueOnce([callbackUpdate({
+      updateId: 3,
+      data: 'sk:1',
+      callbackId: 'cb-page',
+      text: 'Choose a skill.',
+    })])
+    await waitFor(() => h.edits.length > editsBefore ? true : undefined, 'page edited')
+    const second = h.edits[h.edits.length - 1]
+    expect(second?.replyMarkup?.inline_keyboard).toEqual([
+      [{ text: 'skill-20', copy_text: { text: '//skill-20 ' } }],
+      [{ text: '‹ Prev', callback_data: 'sk:0' }],
+    ])
+  })
+
+  it('/skills reports when the skills service is absent', async () => {
+    const h = createHarness({}, { skills: 'missing' })
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    await bindDefaultWorkspace(h)
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: '/skills', updateId: 2 })])
+    await waitFor(() => h.sent.some(s => s.text === 'No skills are available in this workspace.') ? true : undefined, 'missing notice')
   })
 })

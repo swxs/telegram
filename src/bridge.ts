@@ -8,13 +8,14 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { AgentHandle } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { TelegramClient } from './client.js'
 import type {
   BotCommand,
+  InlineKeyboardButton,
   InlineKeyboardMarkup,
   TelegramCallbackQuery,
   TelegramClientLike,
@@ -86,10 +87,21 @@ interface WorkspaceRegistryLike {
   get(id: string): WorkspaceLike | undefined
 }
 
+/** Runtime slice of `ctx.skills` used by the skill picker. */
+interface SkillLike {
+  readonly name: string
+  readonly invocation?: { readonly userInvocable?: boolean }
+}
+
+interface SkillsLike {
+  list(options?: { cwd?: string, scope?: unknown }): Promise<SkillLike[]>
+}
+
 const WELCOME_TEXT = 'Hello! I am the DeepSeek Harness agent. Send me a message or /help for commands.'
 const HELP_TEXT = [
   '/start — choose a workspace and start a session',
   '/clear — reset the current session',
+  '/skills — choose a skill',
   '/help — show this help',
 ].join('\n')
 const CHOOSE_WORKSPACE_TEXT = 'Choose a workspace first with /start.'
@@ -97,12 +109,18 @@ const NO_WORKSPACE_TEXT = 'No workspaces are available. Create one in DeepSeek H
 const WORKSPACE_GONE_TEXT = 'That workspace is no longer available.'
 const ATTACH_FAILED_TEXT = 'The session could not be attached to this workspace. It is still available.'
 const PICKER_INTRO = 'Choose a workspace.'
+const SKILL_PICKER_INTRO = 'Choose a skill.'
+const NO_SKILL_TEXT = 'No skills are available in this workspace.'
 const WORKSPACE_CALLBACK_PREFIX = 'ws:'
+const SKILL_CALLBACK_PREFIX = 'sk:'
+const SKILL_PAGE_SIZE = 20
+const SKILL_COLUMNS = 2
 const BUTTON_TEXT_MAX = 64
 
 const COMMAND_MENU: readonly BotCommand[] = [
   { command: 'start', description: 'choose a workspace and start a session' },
   { command: 'clear', description: 'reset the current session' },
+  { command: 'skills', description: 'choose a skill' },
   { command: 'help', description: 'show this help' },
 ]
 
@@ -133,6 +151,57 @@ function usingWorkspaceText(workspace: { title: string, path: string }): string 
 /** Picker body: titles live on the buttons; path is confirmed after a pick. */
 function pickerText(): string {
   return PICKER_INTRO
+}
+
+/** First whitespace-separated token. */
+function firstToken(text: string): string {
+  return text.split(/\s+/)[0] ?? ''
+}
+
+/** First slash token with a possible `@bot` suffix stripped. */
+function commandToken(text: string): string {
+  const token = firstToken(text)
+  const at = token.indexOf('@')
+  return at === -1 ? token : token.slice(0, at)
+}
+
+/**
+ * Rewrite a `//name` invoke to `/name`, keeping the rest of the message.
+ * A bare `//` token is not a Skill invoke.
+ */
+function rewriteSkillInvoke(text: string): string | undefined {
+  const command = commandToken(text)
+  if (!command.startsWith('//') || command.length <= 2) return undefined
+  return `/${command.slice(2)}${text.slice(firstToken(text).length)}`
+}
+
+/** Pack names into rows of `columns`. */
+function chunkRows<T>(items: readonly T[], columns: number): T[][] {
+  const rows: T[][] = []
+  for (let i = 0; i < items.length; i += columns) {
+    rows.push([...items.slice(i, i + columns)])
+  }
+  return rows
+}
+
+/** Two-column Skill picker; copies `//name `; pages of 20 with Prev/Next. */
+function skillPickerMarkup(names: readonly string[], page = 0): InlineKeyboardMarkup {
+  const pageCount = Math.max(1, Math.ceil(names.length / SKILL_PAGE_SIZE))
+  const safePage = Math.min(Math.max(page, 0), pageCount - 1)
+  const slice = names.slice(safePage * SKILL_PAGE_SIZE, (safePage + 1) * SKILL_PAGE_SIZE)
+  const rows: InlineKeyboardButton[][] = chunkRows(slice, SKILL_COLUMNS).map(row =>
+    row.map(name => ({
+      text: buttonText(name, false),
+      copy_text: { text: `//${name} ` },
+    })),
+  )
+  if (names.length > SKILL_PAGE_SIZE) {
+    const pager: InlineKeyboardButton[] = []
+    if (safePage > 0) pager.push({ text: '‹ Prev', callback_data: `${SKILL_CALLBACK_PREFIX}${safePage - 1}` })
+    if (safePage < pageCount - 1) pager.push({ text: 'Next ›', callback_data: `${SKILL_CALLBACK_PREFIX}${safePage + 1}` })
+    if (pager.length > 0) rows.push(pager)
+  }
+  return { inline_keyboard: rows }
 }
 
 /** One button per row; callback data is `ws:` plus the Workspace id. */
@@ -329,8 +398,14 @@ export class TelegramBridge {
     await this.safeAnswer(query.id)
     const message = query.message
     if (message === undefined) return
-    await this.stripButtons(message)
     const data = query.data
+    if (data !== undefined && data.startsWith(SKILL_CALLBACK_PREFIX)) {
+      const page = Number(data.slice(SKILL_CALLBACK_PREFIX.length))
+      if (!Number.isInteger(page) || page < 0) return
+      await this.sendSkillPicker(message.chat.id, { page, edit: message })
+      return
+    }
+    await this.stripButtons(message)
     if (data === undefined || !data.startsWith(WORKSPACE_CALLBACK_PREFIX)) return
     const workspaceId = data.slice(WORKSPACE_CALLBACK_PREFIX.length)
     const chatId = message.chat.id
@@ -344,10 +419,38 @@ export class TelegramBridge {
   }
 
   private async handleCommand(chatId: number, text: string, fromId?: number): Promise<void> {
-    const command = text.split(/\s+/)[0] as string
+    const invoked = rewriteSkillInvoke(text)
+    if (invoked !== undefined) {
+      const chat = this.chats.get(String(chatId))
+      if (chat === undefined) {
+        await this.safeSend(chatId, CHOOSE_WORKSPACE_TEXT)
+        return
+      }
+      chat.handle.agent.followup(createUserMessage({
+        content: [{ type: 'text', text: invoked }],
+        source: { kind: 'user' },
+      }))
+      return
+    }
+    const command = commandToken(text)
+    if (command === '//') {
+      const chat = this.chats.get(String(chatId))
+      if (chat === undefined) {
+        await this.safeSend(chatId, CHOOSE_WORKSPACE_TEXT)
+        return
+      }
+      chat.handle.agent.followup(createUserMessage({
+        content: [{ type: 'text', text }],
+        source: { kind: 'user' },
+      }))
+      return
+    }
     switch (command) {
       case '/start':
         await this.sendWorkspacePicker(chatId)
+        break
+      case '/skills':
+        await this.sendSkillPicker(chatId)
         break
       case '/init':
         if (fromId === undefined || !this.initAdminUserIds.includes(fromId)) {
@@ -452,6 +555,59 @@ export class TelegramBridge {
       await this.client.sendMessage(chatId, text, undefined, markup)
     } catch (error) {
       this.ctx.logger.error('[telegram] delivery failed: %s', messageOf(error))
+    }
+  }
+
+  private async sendSkillPicker(chatId: number, options: {
+    page?: number
+    edit?: TelegramMessage
+  } = {}): Promise<void> {
+    const binding = this.bindings.get(String(chatId))
+    const chat = this.chats.get(String(chatId))
+    if (binding === undefined || chat === undefined) {
+      await this.safeSend(chatId, CHOOSE_WORKSPACE_TEXT)
+      return
+    }
+    const names = await this.listSkillNames(binding.path, chat.handle.agent)
+    if (names === undefined || names.length === 0) {
+      await this.safeSend(chatId, NO_SKILL_TEXT)
+      return
+    }
+    const markup = skillPickerMarkup(names, options.page ?? 0)
+    const edit = options.edit
+    try {
+      if (edit !== undefined) {
+        await this.client.editMessageText(chatId, edit.message_id, SKILL_PICKER_INTRO, markup)
+        return
+      }
+      await this.client.sendMessage(chatId, SKILL_PICKER_INTRO, undefined, markup)
+    } catch (error) {
+      if (edit !== undefined) {
+        this.ctx.logger.warn('[telegram] editMessageText failed: %s', messageOf(error))
+        return
+      }
+      this.ctx.logger.error('[telegram] delivery failed: %s', messageOf(error))
+    }
+  }
+
+  /**
+   * List user-invocable Skill names for this Workspace. Web mounts
+   * `skill-filesystem` on the agent preset layer, so discovery needs the
+   * live agent as `scope`; an unscoped host `list({ cwd })` sees none.
+   */
+  private async listSkillNames(cwd: string, agent: Agent): Promise<string[] | undefined> {
+    const skills = (
+      agent.ctx.get('skills') ?? this.ctx.get('skills')
+    ) as SkillsLike | undefined
+    if (skills === undefined) return undefined
+    try {
+      const listed = await skills.list({ cwd, scope: agent })
+      return listed
+        .filter(skill => skill.invocation?.userInvocable !== false)
+        .map(skill => skill.name)
+    } catch (error) {
+      this.ctx.logger.warn('[telegram] skill list failed: %s', messageOf(error))
+      return undefined
     }
   }
 

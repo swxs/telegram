@@ -29,10 +29,15 @@ export interface TelegramMessage {
     readonly text?: string;
     readonly date: number;
 }
+/** Copies `text` to the clipboard when the button is pressed. */
+export interface CopyTextButton {
+    readonly text: string;
+}
 /** One button in an inline keyboard. */
 export interface InlineKeyboardButton {
     readonly text: string;
     readonly callback_data?: string;
+    readonly copy_text?: CopyTextButton;
 }
 /** Reply markup that attaches an inline keyboard under a message. */
 export interface InlineKeyboardMarkup {
