@@ -1,0 +1,39 @@
+src/bridge.ts
+  4522841f3f35702a 11,18
+examples/telegram-agent/README.md
+  4522841f3f35702a 31
+README.md
+  4522841f3f35702a 24,56
+CONTEXT.md
+  4522841f3f35702a 8,31-33
+src/index.ts
+  4522841f3f35702a 25
+examples/telegram-agent/README.zh.md
+  4522841f3f35702a 31
+tests/client.spec.ts
+  4522841f3f35702a 63-70,112
+tests/bridge.spec.ts
+  4522841f3f35702a 11,70-71,115-130,194,206,400,422,457-466,468,472-478,480-489,491-498,905-912,914-933,935-942,944-976,978-985
+src/client.ts
+  4522841f3f35702a 36-39,45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "ee0654acdb59d1a48212ecede786528f95c795b3",
+  "prompts": {
+    "4522841f3f35702a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "97496477-de24-45c6-a861-a0c9640a1600",
+        "model": "grok-4.6"
+      },
+      "human_author": "swxs",
+      "messages": [],
+      "total_additions": 2565,
+      "total_deletions": 2247,
+      "accepted_lines": 1484,
+      "overriden_lines": 191
+    }
+  }
+}
