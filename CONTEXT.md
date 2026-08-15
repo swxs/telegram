@@ -5,7 +5,7 @@ The Telegram bridge relays authorized chats to harness agent sessions. This glos
 ## Language
 
 **Slash Command**:
-A user message that starts with `/` and is handled by the bridge; it is not forwarded to the agent. User-facing commands are `/start`, `/new`, `/clear`, and `/help`. `/init` is an Init Admin command; it is not listed in `/help` or the Command Menu.
+A user message that starts with `/` and is handled by the bridge; it is not forwarded to the agent. User-facing commands are `/start`, `/clear`, and `/help`. `/init` is an Init Admin command; it is not listed in `/help` or the Command Menu.
 _Avoid_: bot action, shortcut, menu item
 
 **Command Menu**:

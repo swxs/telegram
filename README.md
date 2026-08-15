@@ -21,7 +21,7 @@ dsh --profile web --dump-config | grep telegram
 
 ## 接线
 
-`inject: ['agents', 'agentPresets']`。每条已授权文本消息为每个聊天创建或复用 agent（`ctx.agents.create`），经 `followup` 以用户消息转发文本，并把每条 `assistant/message` 文本作为分片的 HTML 格式 Telegram 消息送回聊天。创建 agent 时会 `agentPresets.mount()` 当前部署预设（web profile 默认为 `standard`），否则会话是零工具的。`workspaceRegistry` 可选：若存在，则按 `cwd` 把会话挂到对应工作区，避免 GUI 显示「未分组」；挂载失败只记日志，不挡住消息。命令：`/start`（欢迎）、`/new` 与 `/clear`（新会话，旧 agent 释放）、`/help`。LLM 适配器、会话来自外围 `cordis.yml`。缺少 `agentPresets` 时加载即失败。
+`inject: ['agents', 'agentPresets']`。每条已授权文本消息为每个聊天创建或复用 agent（`ctx.agents.create`），经 `followup` 以用户消息转发文本，并把每条 `assistant/message` 文本作为分片的 HTML 格式 Telegram 消息送回聊天。创建 agent 时会 `agentPresets.mount()` 当前部署预设（web profile 默认为 `standard`），否则会话是零工具的。`workspaceRegistry` 可选：若存在，则按 `cwd` 把会话挂到对应工作区，避免 GUI 显示「未分组」；挂载失败只记日志，不挡住消息。命令：`/start`（欢迎）、`/clear`（新会话，旧 agent 释放）、`/help`。LLM 适配器、会话来自外围 `cordis.yml`。缺少 `agentPresets` 时加载即失败。
 
 ## 配置
 
@@ -53,7 +53,7 @@ dsh --profile web --dump-config | grep telegram
 
 #### 模型看到什么
 
-每条入站聊天消息，模型在该聊天会话中收到逐字的一条用户消息。本包不添加系统提示词或工具 schema；它们来自外围 `cordis.yml` 的插件。命令（`/start`、`/new`、`/clear`、`/help`）不会到达模型。
+每条入站聊天消息，模型在该聊天会话中收到逐字的一条用户消息。本包不添加系统提示词或工具 schema；它们来自外围 `cordis.yml` 的插件。命令（`/start`、`/clear`、`/help`、`/init`）不会到达模型。
 
 #### Token 影响
 

@@ -2,7 +2,7 @@
 
 Handoff spec for [Map: `/init` Command Menu spec](map.md). Decisions live in the closed tickets; this file is what to implement. Terms: `CONTEXT.md`.
 
-An **Init Admin** sends `/init`. The bridge registers or overwrites the bot's default **Command Menu** as the four Slash Commands below. The plugin does not register the menu on startup. `/init` is not in the menu and not in `/help`.
+An **Init Admin** sends `/init`. The bridge registers or overwrites the bot's default **Command Menu** as the three Slash Commands below. The plugin does not register the menu on startup. `/init` is not in the menu and not in `/help`. `/new` is not a command.
 
 ## Behavior
 
@@ -29,17 +29,16 @@ Order and copy are locked. `BotCommand.command` has no leading `/`.
 | `command` | `description` |
 | --- | --- |
 | `start` | start a session |
-| `new` | start a fresh session |
 | `clear` | reset the current session |
 | `help` | show this help |
 
-Do not add `init`. Do not change order or descriptions. Prototype: [command-menu.html](prototype/command-menu.html).
+Do not add `init` or `new`. Do not change order or descriptions. Prototype: [command-menu.html](prototype/command-menu.html).
 
-`/help` body stays the existing four lines (no `/init` line).
+`/help` body stays the existing three lines (no `/init` or `/new` line).
 
 ## `setMyCommands` contract
 
-Call `setMyCommands` with that full four-command list. Omit `scope` (default) and omit `language_code` (unlocalized fallback). That **replaces** the default, unlocalized slot only — it does not merge.
+Call `setMyCommands` with that full three-command list. Omit `scope` (default) and omit `language_code` (unlocalized fallback). That **replaces** the default, unlocalized slot only — it does not merge.
 
 Success is Bot API `ok: true` / `result: true`. The client seam throws on transport failure or non-ok, same as existing `call()`.
 
@@ -78,8 +77,8 @@ Neither takes `scope` or `language_code`. Both mean the default, unlocalized slo
 
 No live Telegram.
 
-1. **`TelegramClient` HTTP** (fetch mock): `setMyCommands` and `getMyCommands` post to the matching methods; request body omits `scope` and `language_code`; `setMyCommands` sends the four commands; token redaction unchanged.
-2. **Bridge:** after a successful Init Admin `/init`, `getMyCommands()` on the fake returns the four locked commands, and the chat received `Initialized the command menu.` Cover: empty `initAdminUserIds` → unknown-command; authorized non-admin → unknown-command; `setMyCommands` throw → `Failed to initialize the command menu.` plus a log, no API `description` in the chat; `/help` still omits `/init`; plugin start does not call `setMyCommands`.
+1. **`TelegramClient` HTTP** (fetch mock): `setMyCommands` and `getMyCommands` post to the matching methods; request body omits `scope` and `language_code`; `setMyCommands` sends the three commands; token redaction unchanged.
+2. **Bridge:** after a successful Init Admin `/init`, `getMyCommands()` on the fake returns the three locked commands, and the chat received `Initialized the command menu.` Cover: empty `initAdminUserIds` → unknown-command; authorized non-admin → unknown-command; `setMyCommands` throw → `Failed to initialize the command menu.` plus a log, no API `description` in the chat; `/help` still omits `/init`; plugin start does not call `setMyCommands`.
 
 ## Out of scope
 

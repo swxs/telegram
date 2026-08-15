@@ -28,7 +28,7 @@ The surrounding composition also loads JSONL session persistence and automatic c
 | `DSH_SESSION_ROOT` | JSONL trajectory directory |
 | `DSH_SYSTEM_PROMPT` | Deployment-provided coding persona |
 
-With no allowlist configured the bot denies every user (fails closed). Commands: `/start`, `/new` (fresh session), `/clear` (reset the session), `/help`.
+With no allowlist configured the bot denies every user (fails closed). Commands: `/start`, `/clear` (reset the session), `/help`.
 
 ## Running
 

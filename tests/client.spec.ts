@@ -69,7 +69,6 @@ describe('TelegramClient', () => {
   it('setMyCommands posts the list without scope or language_code', async () => {
     const commands = [
       { command: 'start', description: 'start a session' },
-      { command: 'new', description: 'start a fresh session' },
       { command: 'clear', description: 'reset the current session' },
       { command: 'help', description: 'show this help' },
     ]

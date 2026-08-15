@@ -240,7 +240,6 @@
   <script>
     const COMMANDS = [
       { command: "start", description: "start a session" },
-      { command: "new", description: "start a fresh session" },
       { command: "clear", description: "reset the current session" },
       { command: "help", description: "show this help" },
     ];
@@ -311,7 +310,7 @@
       document.getElementById("label").textContent = current.key + " — " + current.name;
       document.getElementById("state").textContent =
         "variant: " + current.key + " (" + current.name + ")\n" +
-        "commands: start, new, clear, help\n" +
+        "commands: start, clear, help\n" +
         "init_in_menu: no\n" +
         "last_tap: " + lastTap;
     }

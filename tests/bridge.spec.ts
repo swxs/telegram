@@ -273,14 +273,14 @@ describe('TelegramBridge', () => {
     await waitFor(() => h.sent.some(s => s.text.includes('Hello')) ? true : undefined, 'welcome sent')
   })
 
-  it('/new rotates the session agent and disposes the previous one', async () => {
+  it('/clear rotates the session agent and disposes the previous one', async () => {
     const h = createHarness()
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
     h.client.getUpdates.mockResolvedValueOnce([update({ text: 'first' })])
     await waitFor(() => h.agents.length === 1 ? true : undefined, 'first agent')
     const first = h.agents[0]!
-    h.client.getUpdates.mockResolvedValueOnce([{ ...update({ text: '/new' }), update_id: 2 }])
+    h.client.getUpdates.mockResolvedValueOnce([{ ...update({ text: '/clear' }), update_id: 2 }])
     await waitFor(() => h.agents.length === 2 ? true : undefined, 'second agent')
     expect(first.dispose).toHaveBeenCalledTimes(1)
     // Old-session events no longer deliver.
@@ -289,12 +289,13 @@ describe('TelegramBridge', () => {
     expect(h.sent.some(s => s.text === 'stale')).toBe(false)
   })
 
-  it('/clear behaves like /new', async () => {
+  it('/new is an unknown command', async () => {
     const h = createHarness()
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
-    h.client.getUpdates.mockResolvedValueOnce([update({ text: '/clear' })])
-    await waitFor(() => h.agents.length === 2 ? true : undefined, 'rotated agent')
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: '/new' })])
+    await waitFor(() => h.sent.some(s => s.text.includes('Unknown command /new')) ? true : undefined, 'unknown reply')
+    expect(h.agents.length).toBe(0)
   })
 
   it('/help lists the commands', async () => {
@@ -304,6 +305,7 @@ describe('TelegramBridge', () => {
     h.client.getUpdates.mockResolvedValueOnce([update({ text: '/help' })])
     await waitFor(() => h.sent.some(s => s.text.includes('/start')) ? true : undefined, 'help sent')
     expect(h.sent[0]?.text).not.toContain('/init')
+    expect(h.sent[0]?.text).not.toContain('/new')
   })
 
   it('does not register the Command Menu on start', async () => {
@@ -322,7 +324,6 @@ describe('TelegramBridge', () => {
     await waitFor(() => h.sent.some(s => s.text === 'Initialized the command menu.') ? true : undefined, 'init success')
     await expect(h.client.getMyCommands()).resolves.toEqual([
       { command: 'start', description: 'start a session' },
-      { command: 'new', description: 'start a fresh session' },
       { command: 'clear', description: 'reset the current session' },
       { command: 'help', description: 'show this help' },
     ])
@@ -617,13 +618,13 @@ describe('TelegramBridge', () => {
     expect(h.attachSession).toHaveBeenCalledWith(h.agents[0]!.agent.session.id)
   })
 
-  it('remounts the preset and reattaches on /new', async () => {
+  it('remounts the preset and reattaches on /clear', async () => {
     const h = createHarness()
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
     h.client.getUpdates.mockResolvedValueOnce([update({ text: 'first' })])
     await waitFor(() => h.agents.length === 1 ? true : undefined, 'first agent')
-    h.client.getUpdates.mockResolvedValueOnce([{ ...update({ text: '/new' }), update_id: 2 }])
+    h.client.getUpdates.mockResolvedValueOnce([{ ...update({ text: '/clear' }), update_id: 2 }])
     await waitFor(() => h.agents.length === 2 ? true : undefined, 'second agent')
     expect(h.creates).toHaveLength(2)
     expect(h.creates[1]?.meta?.agentPreset).toBe('standard')

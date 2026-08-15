@@ -47,23 +47,21 @@ export interface TelegramBridgeOptions {
 /** One Telegram chat's current agent session. */
 interface ChatSession {
   readonly chatId: number
-  /** Current agent handle; `/new` and `/clear` rotate it. */
+  /** Current agent handle; `/clear` rotates it. */
   handle: AgentHandle
-  /** Current session id; `/new` and `/clear` rotate it. */
+  /** Current session id; `/clear` rotates it. */
   sessionId: string
 }
 
 const WELCOME_TEXT = 'Hello! I am the DeepSeek Harness agent. Send me a message or /help for commands.'
 const HELP_TEXT = [
   '/start — start a session',
-  '/new — start a fresh session',
   '/clear — reset the current session',
   '/help — show this help',
 ].join('\n')
 
 const COMMAND_MENU: readonly BotCommand[] = [
   { command: 'start', description: 'start a session' },
-  { command: 'new', description: 'start a fresh session' },
   { command: 'clear', description: 'reset the current session' },
   { command: 'help', description: 'show this help' },
 ]
@@ -257,7 +255,6 @@ export class TelegramBridge {
           await this.safeSend(chatId, 'Failed to initialize the command menu.')
         }
         break
-      case '/new':
       case '/clear': {
         const chat = await this.ensureChat(chatId)
         const previous = chat.handle
