@@ -1,6 +1,7 @@
 /**
  * Minimal Telegram Bot API client over `fetch`: long-polling `getUpdates`,
- * `sendMessage` with HTML or plain parse modes, `sendChatAction`, and `getMe`.
+ * `sendMessage` with HTML or plain parse modes, `sendChatAction`, `getMe`,
+ * and default-slot Command Menu `setMyCommands` / `getMyCommands`.
  * The token is embedded in the request URL, so every error path redacts it.
  * @module telegram/client
  */
@@ -37,6 +38,12 @@ export interface TelegramUpdate {
   readonly message?: TelegramMessage
 }
 
+/** One Command Menu entry; `command` has no leading `/`. */
+export interface BotCommand {
+  readonly command: string
+  readonly description: string
+}
+
 /** Runtime seam surface tests substitute with a fake. */
 export interface TelegramClientLike {
   /** Fetch the bot identity; validates the token. */
@@ -47,6 +54,10 @@ export interface TelegramClientLike {
   sendMessage(chatId: number, text: string, parseMode?: 'HTML'): Promise<TelegramMessage>
   /** Send a chat action such as `typing`. */
   sendChatAction(chatId: number, action: string): Promise<boolean>
+  /** Replace the default, unlocalized Command Menu. */
+  setMyCommands(commands: readonly BotCommand[]): Promise<boolean>
+  /** Read the default, unlocalized Command Menu slot. */
+  getMyCommands(): Promise<BotCommand[]>
 }
 
 /** Options for {@link TelegramClient}. */
@@ -168,5 +179,24 @@ export class TelegramClient implements TelegramClientLike {
    */
   sendChatAction(chatId: number, action: string): Promise<boolean> {
     return this.call<boolean>('sendChatAction', { chat_id: chatId, action })
+  }
+
+  /**
+   * Replace the default, unlocalized Command Menu. Omits `scope` and
+   * `language_code` so Telegram writes that slot only.
+   * @param commands - the full list to set; each `command` has no `/`.
+   * @returns whether the list was accepted.
+   */
+  setMyCommands(commands: readonly BotCommand[]): Promise<boolean> {
+    return this.call<boolean>('setMyCommands', { commands })
+  }
+
+  /**
+   * Read the default, unlocalized Command Menu slot. Omits `scope` and
+   * `language_code`. An unset slot is an empty list.
+   * @returns the commands stored in that slot.
+   */
+  getMyCommands(): Promise<BotCommand[]> {
+    return this.call<BotCommand[]>('getMyCommands', {})
   }
 }

@@ -28,6 +28,8 @@ export interface TelegramBridgeOptions {
     cwd?: string;
     /** Deployment agent preset id each created agent joins (default when unset). */
     preset?: string;
+    /** User ids allowed to invoke `/init`; empty means nobody. */
+    initAdminUserIds?: number[];
     /** Client seam; tests substitute a fake. */
     client?: TelegramClientLike;
     /** Delay seam; tests substitute an instant sleep. */
@@ -50,6 +52,7 @@ export declare class TelegramBridge {
     private readonly maxMessageLength;
     private readonly cwd;
     private readonly preset;
+    private readonly initAdminUserIds;
     private readonly sleep;
     private readonly chats;
     private offset;

@@ -13,7 +13,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { TelegramClient } from './client.js'
-import type { TelegramClientLike, TelegramMessage, TelegramUpdate } from './client.js'
+import type { BotCommand, TelegramClientLike, TelegramMessage, TelegramUpdate } from './client.js'
 import { markdownToHtml, splitMessage } from './format.js'
 
 /** Options for {@link TelegramBridge}. */
@@ -36,6 +36,8 @@ export interface TelegramBridgeOptions {
   cwd?: string
   /** Deployment agent preset id each created agent joins (default when unset). */
   preset?: string
+  /** User ids allowed to invoke `/init`; empty means nobody. */
+  initAdminUserIds?: number[]
   /** Client seam; tests substitute a fake. */
   client?: TelegramClientLike
   /** Delay seam; tests substitute an instant sleep. */
@@ -58,6 +60,13 @@ const HELP_TEXT = [
   '/clear — reset the current session',
   '/help — show this help',
 ].join('\n')
+
+const COMMAND_MENU: readonly BotCommand[] = [
+  { command: 'start', description: 'start a session' },
+  { command: 'new', description: 'start a fresh session' },
+  { command: 'clear', description: 'reset the current session' },
+  { command: 'help', description: 'show this help' },
+]
 
 // Floor between polls so an instant-empty transport cannot hot-loop the
 // event loop; real long polling already blocks for the polling timeout.
@@ -108,6 +117,7 @@ export class TelegramBridge {
   private readonly maxMessageLength: number
   private readonly cwd: string
   private readonly preset: string | undefined
+  private readonly initAdminUserIds: number[]
   private readonly sleep: (ms: number) => Promise<void>
   private readonly chats = new Map<string, ChatSession>()
   private offset: number | undefined
@@ -133,6 +143,7 @@ export class TelegramBridge {
     this.maxMessageLength = options.maxMessageLength ?? 4096
     this.cwd = options.cwd ?? process.cwd()
     this.preset = options.preset
+    this.initAdminUserIds = options.initAdminUserIds ?? []
     this.sleep = options.sleep ?? ((ms: number) => new Promise(resolve => setTimeout(resolve, ms)))
   }
 
@@ -211,7 +222,7 @@ export class TelegramBridge {
       return
     }
     if (message.text.startsWith('/')) {
-      await this.handleCommand(message.chat.id, message.text)
+      await this.handleCommand(message.chat.id, message.text, message.from?.id)
       return
     }
     const chat = await this.ensureChat(message.chat.id)
@@ -226,12 +237,25 @@ export class TelegramBridge {
     return message.from !== undefined && this.allowedUserIds.includes(message.from.id)
   }
 
-  private async handleCommand(chatId: number, text: string): Promise<void> {
+  private async handleCommand(chatId: number, text: string, fromId?: number): Promise<void> {
     const command = text.split(/\s+/)[0] as string
     switch (command) {
       case '/start':
         await this.ensureChat(chatId)
         await this.safeSend(chatId, WELCOME_TEXT)
+        break
+      case '/init':
+        if (fromId === undefined || !this.initAdminUserIds.includes(fromId)) {
+          await this.safeSend(chatId, `Unknown command ${command}. Send /help for commands.`)
+          break
+        }
+        try {
+          await this.client.setMyCommands(COMMAND_MENU)
+          await this.safeSend(chatId, 'Initialized the command menu.')
+        } catch (error) {
+          this.ctx.logger.error('[telegram] setMyCommands failed: %s', messageOf(error))
+          await this.safeSend(chatId, 'Failed to initialize the command menu.')
+        }
         break
       case '/new':
       case '/clear': {

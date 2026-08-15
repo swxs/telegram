@@ -42,6 +42,7 @@ export const Config: Schema<TelegramConfig> = Schema.object({
   pollingTimeoutSec: Schema.number().default(30),
   cwd: Schema.string(),
   preset: Schema.string(),
+  initAdminUserIds: Schema.array(Schema.number()).default([]),
 })
 
 /**

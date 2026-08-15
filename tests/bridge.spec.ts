@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import { TelegramBridge } from '../src/bridge.ts'
 import type { TelegramBridgeOptions } from '../src/bridge.ts'
-import type { TelegramClientLike, TelegramUpdate } from '../src/client.ts'
+import type { BotCommand, TelegramClientLike, TelegramUpdate } from '../src/client.ts'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 interface FakeAgent {
@@ -36,6 +36,8 @@ interface Harness {
     getUpdates: Mock
     sendMessage: Mock
     sendChatAction: Mock
+    setMyCommands: Mock
+    getMyCommands: Mock
   }
   ctx: {
     on: Mock
@@ -98,11 +100,14 @@ function createHarness(options: Partial<TelegramBridgeOptions> = {}, seams: Harn
     attachSession.mockRejectedValue(new Error('attach failed'))
   }
   let listener: ((session: { id: string }, event: SessionEvent) => void) | undefined
+  let menu: BotCommand[] = []
   const client: TelegramClientLike & {
     getMe: Mock
     getUpdates: Mock
     sendMessage: Mock
     sendChatAction: Mock
+    setMyCommands: Mock
+    getMyCommands: Mock
   } = {
     getMe: vi.fn(async () => ({ id: 1, is_bot: true })),
     getUpdates: vi.fn(async (offset?: number) => { polls.push(offset); return [] as TelegramUpdate[] }),
@@ -114,6 +119,11 @@ function createHarness(options: Partial<TelegramBridgeOptions> = {}, seams: Harn
       actions.push({ chatId, action })
       return true
     }),
+    setMyCommands: vi.fn(async (commands: readonly BotCommand[]) => {
+      menu = [...commands]
+      return true
+    }),
+    getMyCommands: vi.fn(async () => menu),
   }
   const ctx: {
     on: Mock
@@ -293,6 +303,59 @@ describe('TelegramBridge', () => {
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
     h.client.getUpdates.mockResolvedValueOnce([update({ text: '/help' })])
     await waitFor(() => h.sent.some(s => s.text.includes('/start')) ? true : undefined, 'help sent')
+    expect(h.sent[0]?.text).not.toContain('/init')
+  })
+
+  it('does not register the Command Menu on start', async () => {
+    const h = createHarness({ initAdminUserIds: [42] })
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    await settle()
+    expect(h.client.setMyCommands).not.toHaveBeenCalled()
+  })
+
+  it('/init as an Init Admin registers the Command Menu', async () => {
+    const h = createHarness({ allowAllUsers: false, allowedUserIds: [42], initAdminUserIds: [42] })
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: '/init', fromId: 42 })])
+    await waitFor(() => h.sent.some(s => s.text === 'Initialized the command menu.') ? true : undefined, 'init success')
+    await expect(h.client.getMyCommands()).resolves.toEqual([
+      { command: 'start', description: 'start a session' },
+      { command: 'new', description: 'start a fresh session' },
+      { command: 'clear', description: 'reset the current session' },
+      { command: 'help', description: 'show this help' },
+    ])
+    expect(h.agents.length).toBe(0)
+  })
+
+  it('/init with an empty Init Admin list is an unknown command', async () => {
+    const h = createHarness({ allowAllUsers: true })
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: '/init' })])
+    await waitFor(() => h.sent.some(s => s.text.includes('Unknown command /init')) ? true : undefined, 'unknown reply')
+    expect(h.client.setMyCommands).not.toHaveBeenCalled()
+  })
+
+  it('/init from an authorized non-admin is an unknown command', async () => {
+    const h = createHarness({ allowAllUsers: false, allowedUserIds: [42], initAdminUserIds: [99] })
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: '/init', fromId: 42 })])
+    await waitFor(() => h.sent.some(s => s.text.includes('Unknown command /init')) ? true : undefined, 'unknown reply')
+    expect(h.client.setMyCommands).not.toHaveBeenCalled()
+  })
+
+  it('/init reports failure without the API description when setMyCommands throws', async () => {
+    const h = createHarness({ allowAllUsers: true, initAdminUserIds: [42] })
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    h.client.setMyCommands.mockRejectedValueOnce(new Error('telegram setMyCommands failed: Bad Request for bott:ok'))
+    h.client.getUpdates.mockResolvedValueOnce([update({ text: '/init', fromId: 42 })])
+    await waitFor(() => h.sent.some(s => s.text === 'Failed to initialize the command menu.') ? true : undefined, 'init failure')
+    expect(h.sent.some(s => s.text.includes('Bad Request') || s.text.includes('t:ok'))).toBe(false)
+    expect(h.ctx.logger.error.mock.calls.some((call: unknown[]) => String(call[0]).includes('setMyCommands failed'))).toBe(true)
   })
 
   it('replies to unknown commands', async () => {
@@ -473,6 +536,8 @@ describe('TelegramBridge', () => {
       getUpdates: vi.fn(async () => [] as TelegramUpdate[]),
       sendMessage: vi.fn(async () => ({ message_id: 1, chat: { id: 7, type: 'private' }, date: 0 })),
       sendChatAction: vi.fn(async () => true),
+      setMyCommands: vi.fn(async () => true),
+      getMyCommands: vi.fn(async () => []),
     }
     const ctx = {
       on: () => () => {},

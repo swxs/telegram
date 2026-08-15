@@ -36,6 +36,7 @@ dsh --profile web --dump-config | grep telegram
 | `pollingTimeoutSec` | `30` | 长轮询超时（秒） |
 | `cwd` | 进程 `cwd` | 每个 agent 会话的工作目录；也用于解析/创建 workspace 分组 |
 | `preset` | 组合默认预设 | 每个新建 agent 加入的 agent 预设 id；未设时走 `agentPresets.resolve()` 的默认 |
+| `initAdminUserIds` | `[]` | 允许发送 `/init` 登记 Command Menu 的 Telegram 用户 id；空列表则谁都不能 `/init` |
 
 缺少 token 时加载即报错（fail loud）。缺少 `agentPresets` 服务时同样加载失败——零工具 agent 看起来像在聊，实际不能干活。未配置白名单时 bot 拒绝所有用户（fail closed）。`workspaceRegistry` 缺失或 `attachSession` 失败不会阻止插件加载或消息投递。`TelegramConfig` 还接受仅运行时使用的 `client` 与 `sleep` 接缝供测试使用；生产环境使用全局 `fetch` 与真实定时器。所有错误经 `ctx.logger` 记录且 bot token 被脱敏。
 

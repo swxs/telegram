@@ -66,6 +66,42 @@ describe('TelegramClient', () => {
     await expect(client.sendChatAction(7, 'typing')).resolves.toBe(true)
   })
 
+  it('setMyCommands posts the list without scope or language_code', async () => {
+    const commands = [
+      { command: 'start', description: 'start a session' },
+      { command: 'new', description: 'start a fresh session' },
+      { command: 'clear', description: 'reset the current session' },
+      { command: 'help', description: 'show this help' },
+    ]
+    const fetchImpl = fetchMock(async () => jsonResponse({ ok: true, result: true }))
+    const client = new TelegramClient('t:ok', { fetch: fetchImpl as typeof fetch })
+    await expect(client.setMyCommands(commands)).resolves.toBe(true)
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe('https://api.telegram.org/bott:ok/setMyCommands')
+    const body = JSON.parse((fetchImpl.mock.calls[0]?.[1] as RequestInit).body as string) as Record<string, unknown>
+    expect(body).toEqual({ commands })
+    expect(body.scope).toBeUndefined()
+    expect(body.language_code).toBeUndefined()
+  })
+
+  it('getMyCommands reads the default slot without scope or language_code', async () => {
+    const commands = [{ command: 'help', description: 'show this help' }]
+    const fetchImpl = fetchMock(async () => jsonResponse({ ok: true, result: commands }))
+    const client = new TelegramClient('t:ok', { fetch: fetchImpl as typeof fetch })
+    await expect(client.getMyCommands()).resolves.toEqual(commands)
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe('https://api.telegram.org/bott:ok/getMyCommands')
+    const body = JSON.parse((fetchImpl.mock.calls[0]?.[1] as RequestInit).body as string) as Record<string, unknown>
+    expect(body).toEqual({})
+  })
+
+  it('redacts the token when setMyCommands fails', async () => {
+    const fetchImpl = fetchMock(async () => jsonResponse(
+      { ok: false, description: 'Unauthorized for bott:ok' },
+      401,
+    ))
+    const client = new TelegramClient('t:ok', { fetch: fetchImpl as typeof fetch })
+    await expect(client.setMyCommands([])).rejects.toThrow('telegram setMyCommands failed: Unauthorized for bot***')
+  })
+
   it('redacts thrown non-Error values from transport errors', async () => {
     const fetchImpl = fetchMock(async () => { throw 'raw failure with bott:ok' })
     const client = new TelegramClient('t:ok', { fetch: fetchImpl as typeof fetch })
