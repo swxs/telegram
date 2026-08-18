@@ -1,0 +1,16 @@
+package.json
+  h_ee4a963711c0f7 2
+cordis.patch.yml
+  h_ee4a963711c0f7 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "e4363c44a33d6fbb894453c5bed976d60f34b93f",
+  "prompts": {},
+  "humans": {
+    "h_ee4a963711c0f7": {
+      "author": "swxs"
+    }
+  }
+}
