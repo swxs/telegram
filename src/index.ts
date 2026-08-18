@@ -13,6 +13,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { TelegramBridge } from './bridge.js'
 import type { TelegramBridgeOptions } from './bridge.js'
+import { createProxiedFetch, formatProxyForLog, resolveTelegramProxy } from './proxy.js'
 
 export * from './bridge.js'
 export * from './client.js'
@@ -44,6 +45,8 @@ export const Config: Schema<TelegramConfig> = Schema.object({
   cwd: Schema.string(),
   preset: Schema.string(),
   initAdminUserIds: Schema.array(Schema.number()).default([]),
+  // Empty falls back to HTTPS_PROXY/HTTP_PROXY; only Bot API requests are proxied.
+  proxy: Schema.string().default(''),
 })
 
 /**
@@ -61,9 +64,29 @@ export function apply(ctx: Context, config: TelegramConfig): void {
   if (ctx.get('agentPresets') === undefined) {
     throw new Error('telegram: missing agentPresets (the composition must provide the agent preset service)')
   }
-  const bridge = new TelegramBridge(ctx, { ...config, token })
+  let fetchImpl: typeof fetch | undefined
+  let closeProxy: (() => Promise<void>) | undefined
+  // Tests inject `client`; skip proxy so HTTP_PROXY in the runner cannot
+  // construct an unused agent or log a misleading "using proxy" line.
+  if (config.client === undefined) {
+    const proxyUrl = resolveTelegramProxy(config.proxy)
+    if (proxyUrl !== undefined) {
+      ctx.logger.info('[telegram] using proxy %s', formatProxyForLog(proxyUrl))
+      const proxied = createProxiedFetch(proxyUrl)
+      fetchImpl = proxied.fetch
+      closeProxy = () => proxied.close()
+    }
+  }
+  const bridge = new TelegramBridge(ctx, {
+    ...config,
+    token,
+    ...(fetchImpl === undefined ? {} : { fetch: fetchImpl }),
+  })
   ctx.effect(() => {
     bridge.start()
-    return () => { void bridge.stop() }
+    return () => {
+      void bridge.stop()
+      if (closeProxy !== undefined) void closeProxy()
+    }
   }, 'telegram.serve')
 }

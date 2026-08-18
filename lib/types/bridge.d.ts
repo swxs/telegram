@@ -33,6 +33,13 @@ export interface TelegramBridgeOptions {
     preset?: string;
     /** User ids allowed to invoke `/init`; empty means nobody. */
     initAdminUserIds?: number[];
+    /**
+     * HTTP/HTTPS proxy for Bot API requests. Empty falls back to
+     * `HTTPS_PROXY` / `HTTP_PROXY` when the plugin loads. Ignored when `client` is set.
+     */
+    proxy?: string;
+    /** HTTP client seam; production uses the global `fetch` or a proxied fetch. */
+    fetch?: typeof fetch;
     /** Client seam; tests substitute a fake. */
     client?: TelegramClientLike;
     /** Delay seam; tests substitute an instant sleep. */

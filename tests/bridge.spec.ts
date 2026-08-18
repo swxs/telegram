@@ -690,6 +690,28 @@ describe('TelegramBridge', () => {
     expect(defaulted).toBeInstanceOf(TelegramBridge)
   })
 
+  it('passes the fetch seam into the production client', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true, result: [] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }))
+    const ctx = {
+      on: () => () => {},
+      agents: { create: vi.fn() },
+      logger: { warn: vi.fn(), error: vi.fn() },
+      get: vi.fn(() => undefined),
+    }
+    const bridge = new TelegramBridge(ctx as unknown as Context, {
+      token: 't:ok',
+      fetch: fetchImpl as typeof fetch,
+      sleep: async () => {},
+    })
+    bridge.start()
+    await waitFor(() => fetchImpl.mock.calls.length > 0 ? true : undefined, 'fetch')
+    await bridge.stop()
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toContain('https://api.telegram.org/bott:ok/getUpdates')
+  })
+
   it.each([
     ['null', null],
     ['undefined', undefined],

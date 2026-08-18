@@ -148,4 +148,16 @@ describe('dsh-telegram plugin apply', () => {
     }
     expect(() => apply(ctx as unknown as Context, { token: 'test-token' })).toThrow('missing agentPresets')
   })
+
+  it('fails loudly at load when the proxy URL is not http or https', () => {
+    const ctx = {
+      get: () => ({}),
+      effect: () => {},
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    }
+    expect(() => apply(ctx as unknown as Context, {
+      token: 'test-token',
+      proxy: 'socks5://127.0.0.1:1080',
+    })).toThrow('need http:// or https://')
+  })
 })

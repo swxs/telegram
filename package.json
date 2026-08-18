@@ -29,7 +29,11 @@
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1"
   },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
   "devDependencies": {
+    "@types/node": "^22.20.0",
     "typescript": "^5.9.0"
   }
 }

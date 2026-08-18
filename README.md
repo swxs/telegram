@@ -14,6 +14,7 @@ dsh --profile web --dump-config | grep telegram
 - **宿主前置条件**：dsh 组合必须挂载 `agents` 与 `agentPresets`（`@deepseek-ai/dsh-agent` 及部署预设服务）；LLM 适配器、会话来自外围 `cordis.yml`（见 [`telegram-agent`](examples/telegram-agent/README.zh.md) 示例）。缺少 `agentPresets` 时插件加载失败。
 - 卸载：`dsh plugin --profile web remove telegram`。
 - 安装后需重启目标 profile 的 DSH 进程（组合层变更不参与 HMR 热更新）。
+- 运行入口是编译产物 `lib/`（由 `src/` 经 `tsc` 生成）。不要把 `lib` 写进 `.gitignore`：`dsh plugin add <git-url>` 装的是仓库内容，GitHub Action 不会替 clone 出一份 `lib`。CI 在默认分支上编译并回写过期的 `lib`；PR 上若 `lib` 与 `src` 不一致会失败。本地也可 `npm run build`（需能解析 `@deepseek-ai/*` 类型，或继续用 `DSH_CHECKOUT` 跑 `scripts/build.sh`）。
 
 ## 概述
 
@@ -37,8 +38,9 @@ dsh --profile web --dump-config | grep telegram
 | `cwd` | （未使用） | 保留字段，避免旧 profile 加载失败；运行时忽略。会话工作目录来自用户在 `/start` 选中的 Workspace |
 | `preset` | 组合默认预设 | 每个新建 agent 加入的 agent 预设 id；未设时走 `agentPresets.resolve()` 的默认 |
 | `initAdminUserIds` | `[]` | 允许发送 `/init` 登记 Command Menu 的 Telegram 用户 id；空列表则谁都不能 `/init` |
+| `proxy` | `''` | Bot API 的 HTTP/HTTPS 代理（例如 `http://localhost:15236`）。为空时回退 `HTTPS_PROXY` / `HTTP_PROXY`（含小写）。只代理 Telegram 请求，不改进程 env，也不影响 LLM |
 
-缺少 token 时加载即报错（fail loud）。缺少 `agentPresets` 服务时同样加载失败——零工具 agent 看起来像在聊，实际不能干活。未配置白名单时 bot 拒绝所有用户（fail closed）。`workspaceRegistry` 缺失不会阻止插件加载，但用户无法选择 Workspace、也就不会建会话。`TelegramConfig` 还接受仅运行时使用的 `client` 与 `sleep` 接缝供测试使用；生产环境使用全局 `fetch` 与真实定时器。所有错误经 `ctx.logger` 记录且 bot token 被脱敏。
+缺少 token 时加载即报错（fail loud）。缺少 `agentPresets` 服务时同样加载失败——零工具 agent 看起来像在聊，实际不能干活。未配置白名单时 bot 拒绝所有用户（fail closed）。`workspaceRegistry` 缺失不会阻止插件加载，但用户无法选择 Workspace、也就不会建会话。`TelegramConfig` 还接受仅运行时使用的 `client` 与 `sleep` 接缝供测试使用；生产环境使用全局 `fetch`（配置了 `proxy` 或存在 `HTTPS_PROXY`/`HTTP_PROXY` 时则经 HTTP CONNECT 隧道）与真实定时器。非法代理 URL（含 `socks://`）加载即报错。代理进程未开时沿用长轮询退避重试，不会把 DSH 拉崩。所有错误经 `ctx.logger` 记录且 bot token 被脱敏。
 
 ## 投递语义
 
