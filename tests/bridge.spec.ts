@@ -103,7 +103,7 @@ function createHarness(options: Partial<TelegramBridgeOptions> = {}, seams: Harn
   }
   const workspaces = [
     { id: 'ws-obsidian', path: 'D:\\codehouse\\obsidian', title: 'obsidian', attachSession },
-    { id: 'ws-telegram', path: 'D:\\codehouse\\telegram', title: 'telegram', attachSession },
+    { id: 'ws-telegram', path: 'D:\\codehouse\\dsh-telegram', title: 'dsh-telegram', attachSession },
   ]
   const registry = {
     list: vi.fn(() => seams.workspaceRegistry === 'empty' ? [] : workspaces),
@@ -360,7 +360,7 @@ describe('TelegramBridge', () => {
     expect(h.agents.length).toBe(0)
     expect(h.sent[0]?.replyMarkup?.inline_keyboard).toEqual([
       [{ text: 'obsidian', callback_data: 'ws:ws-obsidian' }],
-      [{ text: 'telegram', callback_data: 'ws:ws-telegram' }],
+      [{ text: 'dsh-telegram', callback_data: 'ws:ws-telegram' }],
     ])
     expect(h.sent[0]?.text).toBe('Choose a workspace.')
     expect(h.sent[0]?.text).not.toContain('D:\\codehouse\\')
@@ -867,8 +867,8 @@ describe('TelegramBridge', () => {
     h.client.getUpdates.mockResolvedValueOnce([callbackUpdate({ updateId: 2, data: 'ws:ws-telegram', callbackId: 'cb2' })])
     await waitFor(() => h.agents.length === 2 ? true : undefined, 'second agent')
     expect(first.dispose).not.toHaveBeenCalled()
-    expect(h.creates[1]?.meta?.cwd).toBe('D:\\codehouse\\telegram')
-    expect(h.sent.some(s => s.text === 'Using workspace: telegram\nD:\\codehouse\\telegram')).toBe(true)
+    expect(h.creates[1]?.meta?.cwd).toBe('D:\\codehouse\\dsh-telegram')
+    expect(h.sent.some(s => s.text === 'Using workspace: dsh-telegram\nD:\\codehouse\\dsh-telegram')).toBe(true)
     expect(h.sent.filter(s => s.text.includes('Hello')).length).toBe(2)
   })
 
@@ -900,7 +900,7 @@ describe('TelegramBridge', () => {
     const picker = h.sent.findLast(s => s.replyMarkup !== undefined)
     expect(picker?.replyMarkup?.inline_keyboard).toEqual([
       [{ text: '✓ obsidian', callback_data: 'ws:ws-obsidian' }],
-      [{ text: 'telegram', callback_data: 'ws:ws-telegram' }],
+      [{ text: 'dsh-telegram', callback_data: 'ws:ws-telegram' }],
     ])
   })
 

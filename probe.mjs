@@ -10,7 +10,7 @@
  * while the probe runs — those are runtime polling errors, not load failures.
  *
  * Run from the dsh checkout so tsx picks up its tsconfig paths:
- *   cd <dsh-checkout> && node --import tsx/esm /root/plugin-repos/telegram/probe.mjs
+ *   cd <dsh-checkout> && node --import tsx/esm /root/plugin-repos/dsh-telegram/probe.mjs
  */
 
 import { existsSync, realpathSync } from 'node:fs'
