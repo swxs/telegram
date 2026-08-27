@@ -63,6 +63,11 @@ export interface TelegramBridgeOptions {
   client?: TelegramClientLike
   /** Delay seam; tests substitute an instant sleep. */
   sleep?: (ms: number) => Promise<void>
+  /**
+   * Register `userQuestions` provider for Telegram UI. When false, only
+   * approval is wired (for compositions where the web host owns questions).
+   */
+  registerQuestionProvider?: boolean
 }
 
 /** One Telegram chat's current agent session. */
@@ -240,6 +245,13 @@ class BridgeUserQuestionError extends Error {
   }
 }
 
+function isDuplicateProviderError(error: unknown): boolean {
+  return error !== null
+    && typeof error === 'object'
+    && 'code' in error
+    && (error as { code: unknown }).code === 'DUPLICATE_PROVIDER'
+}
+
 const COMMAND_MENU: readonly BotCommand[] = [
   { command: 'start', description: 'choose a workspace and start a session' },
   { command: 'clear', description: 'reset the current session' },
@@ -399,6 +411,7 @@ export class TelegramBridge {
   private readonly maxMessageLength: number
   private readonly preset: string | undefined
   private readonly initAdminUserIds: number[]
+  private readonly registerQuestionProvider: boolean
   private readonly sleep: (ms: number) => Promise<void>
   private readonly chats = new Map<string, ChatSession>()
   /** Parked sessions keyed by `chatId:workspaceId`; switching away does not dispose them. */
@@ -431,6 +444,7 @@ export class TelegramBridge {
     this.maxMessageLength = options.maxMessageLength ?? 4096
     this.preset = options.preset
     this.initAdminUserIds = options.initAdminUserIds ?? []
+    this.registerQuestionProvider = options.registerQuestionProvider ?? true
     this.sleep = options.sleep ?? ((ms: number) => new Promise(resolve => setTimeout(resolve, ms)))
   }
 
@@ -440,7 +454,12 @@ export class TelegramBridge {
     this.disposeEvents = this.ctx.on('session/event', (session, event) => {
       this.handleSessionEvent(session, event)
     })
-    this.disposeInteractions = this.registerInteractions()
+    // Defer until sibling plugins (e.g. api-gateway) finish apply; only one
+    // userQuestions provider may register — web host wins on duplicate.
+    queueMicrotask(() => {
+      if (this.stopped || this.disposeInteractions !== undefined) return
+      this.disposeInteractions = this.registerInteractions()
+    })
     void this.pollLoop()
   }
 
@@ -888,22 +907,34 @@ export class TelegramBridge {
     if (this.ctx.get('approval') === undefined) {
       throw new Error('telegram: missing approval (the composition must provide the user-approval service)')
     }
-    const disposeProvider = userQuestions.registerProvider({
-      ask: request => this.handleQuestionAsk(request),
-    })
+    const disposers: Array<() => void> = []
+    if (this.registerQuestionProvider) {
+      try {
+        disposers.push(userQuestions.registerProvider({
+          ask: request => this.handleQuestionAsk(request),
+        }))
+      } catch (error) {
+        if (isDuplicateProviderError(error)) {
+          this.ctx.logger.info(
+            '[telegram] user-questions provider already registered (web host); skipping Telegram question UI',
+          )
+        } else {
+          throw error
+        }
+      }
+    }
     const registerApproval = this.ctx.on.bind(this.ctx) as (
       event: 'approval/request',
       handler: (req: ApprovalRequestLike, next: () => Promise<ApprovalOutcome>) => Promise<ApprovalOutcome>,
     ) => () => void
-    const disposeApproval = registerApproval('approval/request', (req, next) => {
+    disposers.push(registerApproval('approval/request', (req, next) => {
       return this.handleApprovalRequest(req, next)
-    })
+    }))
     return () => {
-      disposeProvider()
-      disposeApproval()
+      for (const dispose of disposers) dispose()
       for (const pending of [...this.pendingById.values()]) {
         if (pending.kind === 'question') this.cancelQuestionPending(pending, 'ASK_ABORTED')
-        else this.settleApproval(pending, 'cancelled')
+        else void this.settleApproval(pending, 'cancelled')
       }
     }
   }

@@ -44,6 +44,11 @@ export interface TelegramBridgeOptions {
     client?: TelegramClientLike;
     /** Delay seam; tests substitute an instant sleep. */
     sleep?: (ms: number) => Promise<void>;
+    /**
+     * Register `userQuestions` provider for Telegram UI. When false, only
+     * approval is wired (for compositions where the web host owns questions).
+     */
+    registerQuestionProvider?: boolean;
 }
 /**
  * Bridge between Telegram chats and harness agent sessions. One agent
@@ -62,6 +67,7 @@ export declare class TelegramBridge {
     private readonly maxMessageLength;
     private readonly preset;
     private readonly initAdminUserIds;
+    private readonly registerQuestionProvider;
     private readonly sleep;
     private readonly chats;
     /** Parked sessions keyed by `chatId:workspaceId`; switching away does not dispose them. */

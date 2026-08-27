@@ -35,6 +35,7 @@ dsh --profile web --dump-config | grep telegram
 | 计划审核（`plan-review` intent） | 计划 markdown 分片 + 末片审批按钮 |
 
 - 每个聊天 **FIFO 排队**：同时只展示一条 pending 交互；有 pending 时普通文本不会转发给 agent（须先完成上方交互或 ForceReply 回复）。
+- 与 **web profile**（`api-gateway`）同载时，web 主机注册 `userQuestions` provider，Telegram 自动跳过重复注册；该场景下提问走 Web UI，Telegram 仍处理工具授权。纯 Telegram 部署（如 `telegram-agent` 示例）由 Telegram 注册提问 provider。
 - callback 前缀：`uq:`（提问）、`ap:`（授权）；与既有 `ws:`、`sk:` 并列路由。
 - 示例组合见 [`examples/telegram-agent/cordis.yml`](examples/telegram-agent/cordis.yml)（含 `user-questions`、`tool-ask-user`、`user-approval`、`plan-mode`）。
 

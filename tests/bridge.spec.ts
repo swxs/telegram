@@ -88,8 +88,14 @@ async function waitFor<T>(get: () => T | undefined, description: string): Promis
   }
 }
 
+/** Drain microtasks scheduled during bridge start (deferred interaction registration). */
+async function flushMicrotasks(): Promise<void> {
+  await new Promise<void>(resolve => queueMicrotask(resolve))
+}
+
 /** Drain asynchronous work before a negative assertion. */
 async function settle(): Promise<void> {
+  await flushMicrotasks()
   await new Promise(resolve => setTimeout(resolve, 25))
 }
 
@@ -317,6 +323,7 @@ describe('TelegramBridge', () => {
     const h = createHarness()
     h.bridge.start()
     expect(h.ctx.on).toHaveBeenCalledWith('session/event', expect.any(Function))
+    await settle()
     expect(h.ctx.on).toHaveBeenCalledWith('approval/request', expect.any(Function))
     expect(h.questionProvider()).toBeDefined()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'first poll')
@@ -686,6 +693,8 @@ describe('TelegramBridge', () => {
     const h = createHarness()
     h.bridge.start()
     h.bridge.start()
+    expect(h.ctx.on).toHaveBeenCalledTimes(1)
+    await settle()
     expect(h.ctx.on).toHaveBeenCalledTimes(2)
     await h.bridge.stop()
   })

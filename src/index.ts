@@ -45,6 +45,8 @@ export const Config: Schema<TelegramConfig> = Schema.object({
   cwd: Schema.string(),
   preset: Schema.string(),
   initAdminUserIds: Schema.array(Schema.number()).default([]),
+  // When false, only approval is wired; use alongside web api-gateway which owns userQuestions.
+  registerQuestionProvider: Schema.boolean().default(true),
   // Empty falls back to HTTPS_PROXY/HTTP_PROXY; only Bot API requests are proxied.
   proxy: Schema.string().default(''),
 })
