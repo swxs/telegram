@@ -31,6 +31,8 @@ export interface TelegramMessage {
   readonly from?: TelegramUser
   readonly text?: string
   readonly date: number
+  /** Present when this message replies to another (ForceReply collection). */
+  readonly reply_to_message?: TelegramMessage
 }
 
 /** Copies `text` to the clipboard when the button is pressed. */
@@ -49,6 +51,15 @@ export interface InlineKeyboardButton {
 export interface InlineKeyboardMarkup {
   readonly inline_keyboard: readonly (readonly InlineKeyboardButton[])[]
 }
+
+/** Prompts the user to reply to the bot message (custom text answers). */
+export interface ForceReplyMarkup {
+  readonly force_reply: true
+  readonly selective?: boolean
+}
+
+/** Outbound reply markup supported by {@link TelegramClient.sendMessage}. */
+export type ReplyMarkup = InlineKeyboardMarkup | ForceReplyMarkup
 
 /** Callback from an inline-keyboard press. */
 export interface TelegramCallbackQuery {
@@ -77,8 +88,8 @@ export interface TelegramClientLike {
   getMe(): Promise<TelegramUser>
   /** Long-poll for updates at or after `offset`. */
   getUpdates(offset?: number): Promise<TelegramUpdate[]>
-  /** Send a message, optionally with HTML parse mode and an inline keyboard. */
-  sendMessage(chatId: number, text: string, parseMode?: 'HTML', replyMarkup?: InlineKeyboardMarkup): Promise<TelegramMessage>
+  /** Send a message, optionally with HTML parse mode and reply markup. */
+  sendMessage(chatId: number, text: string, parseMode?: 'HTML', replyMarkup?: ReplyMarkup): Promise<TelegramMessage>
   /** Edit a message's text and optional inline keyboard. */
   editMessageText(chatId: number, messageId: number, text: string, replyMarkup?: InlineKeyboardMarkup): Promise<TelegramMessage>
   /** Acknowledge an inline-keyboard press so Telegram stops the loading state. */
@@ -196,7 +207,7 @@ export class TelegramClient implements TelegramClientLike {
    * @param replyMarkup - inline keyboard to attach under the message.
    * @returns the delivered message object.
    */
-  sendMessage(chatId: number, text: string, parseMode?: 'HTML', replyMarkup?: InlineKeyboardMarkup): Promise<TelegramMessage> {
+  sendMessage(chatId: number, text: string, parseMode?: 'HTML', replyMarkup?: ReplyMarkup): Promise<TelegramMessage> {
     const body: Record<string, unknown> = { chat_id: chatId, text }
     if (parseMode !== undefined) body.parse_mode = parseMode
     if (replyMarkup !== undefined) body.reply_markup = replyMarkup

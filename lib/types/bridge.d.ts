@@ -67,10 +67,13 @@ export declare class TelegramBridge {
     /** Parked sessions keyed by `chatId:workspaceId`; switching away does not dispose them. */
     private readonly parked;
     private readonly bindings;
+    private readonly pendingBuckets;
+    private readonly pendingById;
     private offset;
     private stopped;
     private errorCount;
     private disposeEvents;
+    private disposeInteractions;
     /**
      * @param ctx - Cordis context providing `agents` and `agentPresets`
      * (declared by the plugin's `inject`) and the session/event stream.
@@ -78,9 +81,9 @@ export declare class TelegramBridge {
      * @param options - bridge options.
      */
     constructor(ctx: Context, options: TelegramBridgeOptions);
-    /** Register the session listener and start the polling loop. */
+    /** Register session/interaction listeners and start the polling loop. */
     start(): void;
-    /** Stop polling, unregister the listener, and dispose session agents. */
+    /** Stop polling, unregister listeners, cancel pending interactions, dispose agents. */
     stop(): Promise<void>;
     private pollLoop;
     private handleUpdate;
@@ -125,6 +128,29 @@ export declare class TelegramBridge {
      * the caller; the session remains usable.
      */
     private attachWorkspace;
+    private registerInteractions;
+    private handleQuestionAsk;
+    private handleApprovalRequest;
+    private enqueuePending;
+    private deliverPendingHead;
+    private finishPending;
+    private hasBlockingPending;
+    private chatIdForAgent;
+    private chatForSessionId;
+    private findUnclaimedApprovalId;
+    private deliverQuestionUI;
+    private deliverApprovalUI;
+    private questionMarkup;
+    private handleQuestionCallback;
+    private handleApprovalCallback;
+    private handleForceReplyMessage;
+    private recordQuestionAnswer;
+    private completeQuestionPending;
+    private cancelQuestionPending;
+    private settleApproval;
+    private finalizeAnchor;
+    /** Escape text for Telegram HTML tag bodies (not full markdown). */
+    private safeSendMarkup;
     private stripButtons;
     private safeAnswer;
     private handleSessionEvent;
