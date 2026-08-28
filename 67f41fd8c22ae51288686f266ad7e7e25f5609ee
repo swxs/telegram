@@ -1,0 +1,29 @@
+README.md
+  28b755a9063aaff5 3,5,12,14,16,18,20,22,24,26,28-30,32-35,41,43,45,47-48,50,52,58,60,62-63,65,67,69,71
+  h_ee4a963711c0f7 19,27,31,37,39,46,49,54,56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "67f41fd8c22ae51288686f266ad7e7e25f5609ee",
+  "prompts": {
+    "28b755a9063aaff5": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "8602b2ef-c66c-4f51-877b-f3402a47cd62",
+        "model": "grok-4.6"
+      },
+      "human_author": "swxs",
+      "messages": [],
+      "total_additions": 71,
+      "total_deletions": 89,
+      "accepted_lines": 37,
+      "overriden_lines": 8
+    }
+  },
+  "humans": {
+    "h_ee4a963711c0f7": {
+      "author": "swxs"
+    }
+  }
+}
