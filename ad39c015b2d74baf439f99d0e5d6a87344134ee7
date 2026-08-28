@@ -1,0 +1,14 @@
+.gitignore
+  h_ee4a963711c0f7 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "ad39c015b2d74baf439f99d0e5d6a87344134ee7",
+  "prompts": {},
+  "humans": {
+    "h_ee4a963711c0f7": {
+      "author": "swxs"
+    }
+  }
+}
