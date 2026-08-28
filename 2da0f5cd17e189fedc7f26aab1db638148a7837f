@@ -1,0 +1,50 @@
+tests/plugin-apply.spec.ts
+  eb0d56efca12e32f 100,171,176,182
+tests/bridge.spec.ts
+  eb0d56efca12e32f 4,34-39,41-44,67-68,88,128-149,247-251,256,288-289,1084-1095,1097-1107,1109-1131,1140,1163,1189,1202-1227
+src/tele-ask-user.ts
+  eb0d56efca12e32f 1-6,8-10,12-15,17-23,25-28,30-31,33-37,39-41,43-53,55-155
+CHANGELOG.md
+  28b755a9063aaff5 1,3,5,7,9-14,16,18-21,23,25-26,28,30
+tests/plugin-shape.spec.ts
+  eb0d56efca12e32f 18
+package.json
+  28b755a9063aaff5 4
+src/bridge.ts
+  eb0d56efca12e32f 29,440,679-690,694-700,823-833,972-980,985,995-998,1000-1001,1007-1015,1017-1022,1339-1347
+README.md
+  eb0d56efca12e32f 14,25,29,33-35,37-38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "2da0f5cd17e189fedc7f26aab1db638148a7837f",
+  "prompts": {
+    "28b755a9063aaff5": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "8602b2ef-c66c-4f51-877b-f3402a47cd62",
+        "model": "grok-4.6"
+      },
+      "human_author": "swxs",
+      "messages": [],
+      "total_additions": 31,
+      "total_deletions": 2,
+      "accepted_lines": 21,
+      "overriden_lines": 0
+    },
+    "eb0d56efca12e32f": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f7be4734-3347-41e9-976e-7447025b37ff",
+        "model": "composer-2.5"
+      },
+      "human_author": "swxs",
+      "messages": [],
+      "total_additions": 3486,
+      "total_deletions": 3205,
+      "accepted_lines": 3040,
+      "overriden_lines": 196
+    }
+  }
+}
