@@ -83,12 +83,30 @@ function provideAgentPresets(ctx: Context): void {
   Object.assign(ctx, { agentPresets: service })
 }
 
+function provideInteractionServices(ctx: Context): void {
+  const record = ctx as Context & {
+    provide?(name: string, value: unknown): void
+    set?(name: string, value: unknown): void
+  }
+  const approval = {}
+  if (typeof record.provide === 'function') {
+    record.provide('approval', approval)
+    return
+  }
+  if (typeof record.set === 'function') {
+    record.set('approval', approval)
+    return
+  }
+  Object.assign(ctx, { approval })
+}
+
 describe('dsh-telegram plugin apply', () => {
   it('mounts on the agent spine, polls through the client seam, and disposes cleanly', async () => {
     const client = fakeClient()
     const ctx = new Context()
     await ctx.plugin(agentCore, { workspaceContext: false })
     provideAgentPresets(ctx)
+    provideInteractionServices(ctx)
     await ctx.plugin(telegram, { token: 'test-token', client, sleep: async (ms: number) => new Promise(resolve => setTimeout(resolve, ms)) })
     await waitFor(() => client.polls > 0 ? true : undefined, 'first poll')
     const pollsAtMount = client.polls
@@ -112,6 +130,7 @@ describe('dsh-telegram plugin apply', () => {
       const ctx = new Context()
       await ctx.plugin(agentCore, { workspaceContext: false })
       provideAgentPresets(ctx)
+      provideInteractionServices(ctx)
       await ctx.plugin(telegram, { client, sleep: async (ms: number) => new Promise(resolve => setTimeout(resolve, ms)) })
       await waitFor(() => client.polls > 0 ? true : undefined, 'first poll')
       await ctx.fiber.dispose()
@@ -149,9 +168,20 @@ describe('dsh-telegram plugin apply', () => {
     expect(() => apply(ctx as unknown as Context, { token: 'test-token' })).toThrow('missing agentPresets')
   })
 
+  it('fails loudly at load when approval is missing', () => {
+    const ctx = {
+      get: (name: string) => name === 'agentPresets' ? {} : undefined,
+      effect: () => {},
+    }
+    expect(() => apply(ctx as unknown as Context, { token: 'test-token' })).toThrow('missing approval')
+  })
+
   it('fails loudly at load when the proxy URL is not http or https', () => {
     const ctx = {
-      get: () => ({}),
+      get: (name: string) => {
+        if (name === 'agentPresets' || name === 'approval') return {}
+        return undefined
+      },
       effect: () => {},
       logger: { info: () => {}, warn: () => {}, error: () => {} },
     }

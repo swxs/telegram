@@ -24,7 +24,7 @@ export const name = 'telegram'
 // presets fail at load (zero-tool agents look alive but cannot work).
 // `workspaceRegistry` is optional; without it `/start` cannot list Workspaces.
 // `skills` is optional; without it `/skills` has nothing to list.
-export const inject = ['agents', 'agentPresets']
+export const inject = ['agents', 'agentPresets', 'approval']
 
 /** Telegram bridge deployment config. */
 export interface TelegramConfig extends Omit<TelegramBridgeOptions, 'token'> {
@@ -63,6 +63,9 @@ export function apply(ctx: Context, config: TelegramConfig): void {
   }
   if (ctx.get('agentPresets') === undefined) {
     throw new Error('telegram: missing agentPresets (the composition must provide the agent preset service)')
+  }
+  if (ctx.get('approval') === undefined) {
+    throw new Error('telegram: missing approval (the composition must provide the user-approval service)')
   }
   let fetchImpl: typeof fetch | undefined
   let closeProxy: (() => Promise<void>) | undefined

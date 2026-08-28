@@ -7,6 +7,18 @@
 - id: logger-console
   name: '@cordisjs/plugin-logger-console'
 
+- id: user-questions
+  name: '@deepseek-ai/dsh-user-questions'
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
+- id: user-approval
+  name: '@deepseek-ai/dsh-user-approval'
+
+- id: plan-mode
+  name: '@deepseek-ai/dsh-plan-mode'
+
 - id: telegram
   # This repository's build output is itself the plugin entry (relative to
   # this config file). dsh plugin --profile web add <dir|git-url> mounts a copy the

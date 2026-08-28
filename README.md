@@ -11,7 +11,7 @@ dsh --profile web --dump-config | grep telegram
 
 - 插入行 id：`telegram`（cordis.patch.yml）；不声明模型面工具或技能——它是把 Telegram 聊天桥接到 agent 会话的后台服务插件。
 - **加载即需要 token**：缺少 bot token（配置 `token` 或环境变量 `DSH_TELEGRAM_TOKEN`）时 `apply` 直接报错；没有 token 不会惰性启动。
-- **宿主前置条件**：dsh 组合必须挂载 `agents` 与 `agentPresets`（`@deepseek-ai/dsh-agent` 及部署预设服务）；LLM 适配器、会话来自外围 `cordis.yml`（见 [`telegram-agent`](examples/telegram-agent/README.zh.md) 示例）。缺少 `agentPresets` 时插件加载失败。
+- **宿主前置条件**：dsh 组合必须挂载 `agents`、`agentPresets` 与 `approval`（`@deepseek-ai/dsh-user-approval`）。模型提问由插件注册的 `tele_ask_user` 处理（组合层仍建议挂 `tool-ask-user` 供 Web session 使用）；计划审核（`plan-mode` / `exit_plan_mode`）走组合里的 `user-questions` 与 Web provider，**telegram 插件不 inject、不注册 provider**。LLM 适配器、会话来自外围 `cordis.yml`（见 [`telegram-agent`](examples/telegram-agent/README.zh.md) 示例）。缺少 `agentPresets` 或 `approval` 时插件加载失败。
 - 卸载：`dsh plugin --profile web remove telegram`。
 - 安装后需重启目标 profile 的 DSH 进程（组合层变更不参与 HMR 热更新）。
 - 运行入口是编译产物 `lib/`（由 `src/` 经 `tsc` 生成）。不要把 `lib` 写进 `.gitignore`：`dsh plugin add <git-url>` 装的是仓库内容，GitHub Action 不会替 clone 出一份 `lib`。CI 在默认分支上编译并回写过期的 `lib`；PR 上若 `lib` 与 `src` 不一致会失败。本地也可 `npm run build`（需能解析 `@deepseek-ai/*` 类型，或继续用 `DSH_CHECKOUT` 跑 `scripts/build.sh`）。
@@ -22,7 +22,22 @@ dsh --profile web --dump-config | grep telegram
 
 ## 接线
 
-`inject: ['agents', 'agentPresets']`。`/start` 列出 `workspaceRegistry` 中的 Workspace，用户用 Inline Keyboard 选择后，才为该聊天创建 agent（`ctx.agents.create`，`meta.cwd` 为所选 Workspace 的 path）并 `attachSession`。之后每条已授权文本消息复用该聊天的 agent，经 `followup` 以用户消息转发文本，并把每条 `assistant/message` 文本作为分片的 HTML 格式 Telegram 消息送回聊天。创建 agent 时会 `agentPresets.mount()` 当前部署预设（web profile 默认为 `standard`），否则会话是零工具的。`workspaceRegistry` 可选：缺失或列表为空时 `/start` 提示没有可选 Workspace，不建会话。`attachSession` 失败会告知用户，会话仍可用。命令：`/start`（选择 Workspace 并开始会话）、`/clear`（在已绑定 Workspace 下新开会话，旧 agent 释放）、`/skills`（列出当前 Workspace 已加载的 Skill 名；点选复制 `//name `，粘贴后可改再发）、`/help`。绑定只活在内存里，进程重启后需再 `/start`。LLM 适配器、会话来自外围 `cordis.yml`。缺少 `agentPresets` 时加载即失败。
+`inject: ['agents', 'agentPresets', 'approval']`。`/start` 列出 `workspaceRegistry` 中的 Workspace，用户用 Inline Keyboard 选择后，才为该聊天创建 agent（`ctx.agents.create`，`meta.cwd` 为所选 Workspace 的 path）并 `attachSession`。之后每条已授权文本消息复用该聊天的 agent，经 `followup` 以用户消息转发文本，并把每条 `assistant/message` 文本作为分片的 HTML 格式 Telegram 消息送回聊天。创建 agent 时会 `agentPresets.mount()` 当前部署预设（web profile 默认为 `standard`），并在 agent scope **隐藏** `ask_user_question`、注册 **`tele_ask_user`**，否则会话是零工具的。`workspaceRegistry` 可选：缺失或列表为空时 `/start` 提示没有可选 Workspace，不建会话。`attachSession` 失败会告知用户，会话仍可用。命令：`/start`（选择 Workspace 并开始会话）、`/clear`（在已绑定 Workspace 下新开会话，旧 agent 释放）、`/skills`（列出当前 Workspace 已加载的 Skill 名；点选复制 `//name `，粘贴后可改再发）、`/help`。绑定只活在内存里，进程重启后需再 `/start`。LLM 适配器、会话来自外围 `cordis.yml`。缺少 `agentPresets` 或 `approval` 时加载即失败。
+
+## 对话期交互
+
+Telegram 创建的 agent 在 `setup` 中隐藏全局 `ask_user_question`、注册 `tele_ask_user`（走 bridge 提问 UI）。插件 **不** 注册 `userQuestions` provider，避免与 `api-gateway` 冲突。
+
+| DSH 交互 | Telegram 组件 |
+|---|---|
+| 模型提问（`tele_ask_user`） | Inline Keyboard（单选/多选）+ ForceReply（自定义文本） |
+| 工具授权（`approval/request`） | Inline Keyboard：Allow once / Reject / Cancel；与 Web **race** |
+| 计划审核（`exit_plan_mode`） | **不由本插件处理**；web 同载时走 Web UI；纯 TG 需组合层另有 provider |
+
+- 每个聊天 **FIFO 排队**：同时只展示一条 pending 交互；有 pending 时普通文本不会转发给 agent。
+- **web + Telegram 同载**：模型提问走 `tele_ask_user`；plan 审核与 Web session 提问走 api-gateway；工具授权 TG + Web 双端 race。
+- callback 前缀：`uq:`（提问）、`ap:`（授权）；与既有 `ws:`、`sk:` 并列路由。
+- 示例组合见 [`examples/telegram-agent/cordis.yml`](examples/telegram-agent/cordis.yml)（含 `user-questions`、`tool-ask-user`、`user-approval`、`plan-mode`）。
 
 ## 配置
 
@@ -55,7 +70,7 @@ dsh --profile web --dump-config | grep telegram
 
 #### 模型看到什么
 
-每条入站聊天消息，模型在该聊天会话中收到逐字的一条用户消息。本包不添加系统提示词或工具 schema；它们来自外围 `cordis.yml` 的插件。命令（`/start`、`/clear`、`/skills`、`/help`、`/init`）和 Workspace 选择回调查询不会到达模型。以 `//` 开头的 Skill 调用会改写成 `/` 后作为用户消息转发。其它未知 `/` 命令不会到达模型。
+每条入站聊天消息，模型在该聊天会话中收到逐字的一条用户消息。本包不添加系统提示词或工具 schema；它们来自外围 `cordis.yml` 的插件。命令（`/start`、`/clear`、`/skills`、`/help`、`/init`）和 Workspace 选择、用户提问、工具授权回调查询不会到达模型。以 `//` 开头的 Skill 调用会改写成 `/` 后作为用户消息转发。其它未知 `/` 命令不会到达模型。有 pending 交互时，未针对 ForceReply 的纯文本也不会到达模型。
 
 #### Token 影响
 

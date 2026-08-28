@@ -7,6 +7,7 @@
  * @module telegram/bridge
  */
 import type { Context } from '@deepseek-ai/cordis';
+import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { TelegramClientLike } from './client.js';
 /** Options for {@link TelegramBridge}. */
 export interface TelegramBridgeOptions {
@@ -45,6 +46,42 @@ export interface TelegramBridgeOptions {
     /** Delay seam; tests substitute an instant sleep. */
     sleep?: (ms: number) => Promise<void>;
 }
+/** One selectable option in a user-questions request. */
+interface AskUserQuestionOption {
+    readonly label: string;
+    readonly description?: string;
+}
+/** Plan-review or generic presentation intent on a question. */
+interface AskUserQuestionIntent {
+    readonly kind: 'plan-review';
+    readonly approve: string;
+}
+/** One question in a user-questions batch. */
+interface AskUserQuestionItem {
+    readonly id: string;
+    readonly question: string;
+    readonly detail?: string;
+    readonly header?: string;
+    readonly options?: readonly AskUserQuestionOption[];
+    readonly multiSelect?: boolean;
+    readonly intent?: AskUserQuestionIntent;
+}
+/** Human answer to one question. */
+interface AskUserQuestionAnswerItem {
+    readonly id: string;
+    readonly selected: string[];
+    readonly custom?: string;
+}
+/** Full answer payload for `userQuestions.ask()`. */
+interface AskUserQuestionAnswer {
+    readonly answers: AskUserQuestionAnswerItem[];
+}
+/** User-questions provider request. */
+interface AskUserQuestionRequest {
+    readonly questions: readonly AskUserQuestionItem[];
+    readonly agent?: Agent;
+    readonly signal?: AbortSignal;
+}
 /**
  * Bridge between Telegram chats and harness agent sessions. One agent
  * session per chat; incoming text becomes a user message via `followup`,
@@ -67,10 +104,13 @@ export declare class TelegramBridge {
     /** Parked sessions keyed by `chatId:workspaceId`; switching away does not dispose them. */
     private readonly parked;
     private readonly bindings;
+    private readonly pendingBuckets;
+    private readonly pendingById;
     private offset;
     private stopped;
     private errorCount;
     private disposeEvents;
+    private disposeInteractions;
     /**
      * @param ctx - Cordis context providing `agents` and `agentPresets`
      * (declared by the plugin's `inject`) and the session/event stream.
@@ -78,9 +118,9 @@ export declare class TelegramBridge {
      * @param options - bridge options.
      */
     constructor(ctx: Context, options: TelegramBridgeOptions);
-    /** Register the session listener and start the polling loop. */
+    /** Register session/interaction listeners and start the polling loop. */
     start(): void;
-    /** Stop polling, unregister the listener, and dispose session agents. */
+    /** Stop polling, unregister listeners, cancel pending interactions, dispose agents. */
     stop(): Promise<void>;
     private pollLoop;
     private handleUpdate;
@@ -93,6 +133,11 @@ export declare class TelegramBridge {
      * layer. Mirrors dsh-host-apiproxy's composeAgent for the web surface.
      */
     private composeAgent;
+    /**
+     * Deliver a user-question batch to the Telegram chat bound to `agent`.
+     * Used by the `tele_ask_user` tool on Telegram-bound agents.
+     */
+    askUserQuestion(request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer>;
     private registry;
     private listWorkspaces;
     private lookupWorkspace;
@@ -125,6 +170,31 @@ export declare class TelegramBridge {
      * the caller; the session remains usable.
      */
     private attachWorkspace;
+    private registerInteractions;
+    private handleQuestionAsk;
+    private handleApprovalRequest;
+    private enqueuePending;
+    private deliverPendingHead;
+    private finishPending;
+    private hasBlockingPending;
+    private chatIdForAgent;
+    private chatForSessionId;
+    private findUnclaimedApprovalId;
+    private deliverQuestionUI;
+    private deliverApprovalUI;
+    private questionMarkup;
+    private handleQuestionCallback;
+    private handleApprovalCallback;
+    private handleForceReplyMessage;
+    private recordQuestionAnswer;
+    private completeQuestionPending;
+    private cancelQuestionPending;
+    /** Remove a Telegram approval prompt when Web (or another channel) won the race. */
+    private dismissApprovalPending;
+    private settleApproval;
+    private finalizeAnchor;
+    /** Escape text for Telegram HTML tag bodies (not full markdown). */
+    private safeSendMarkup;
     private stripButtons;
     private safeAnswer;
     private handleSessionEvent;
@@ -134,3 +204,4 @@ export declare class TelegramBridge {
     private safeSend;
     private safeAction;
 }
+export {};
