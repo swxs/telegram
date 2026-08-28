@@ -26,6 +26,7 @@ import type {
   TelegramUser,
 } from './client.js'
 import { markdownToHtml, splitMessage } from './format.js'
+import { wireTeleAskUserTool, registerTelegramSessionHint } from './tele-ask-user.js'
 
 /** Options for {@link TelegramBridge}. */
 export interface TelegramBridgeOptions {
@@ -63,11 +64,6 @@ export interface TelegramBridgeOptions {
   client?: TelegramClientLike
   /** Delay seam; tests substitute an instant sleep. */
   sleep?: (ms: number) => Promise<void>
-  /**
-   * Register `userQuestions` provider for Telegram UI. When false, only
-   * approval is wired (for compositions where the web host owns questions).
-   */
-  registerQuestionProvider?: boolean
 }
 
 /** One Telegram chat's current agent session. */
@@ -182,10 +178,6 @@ interface AskUserQuestionRequest {
   readonly signal?: AbortSignal
 }
 
-interface UserQuestionsLike {
-  registerProvider(provider: { ask(request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer> }): () => void
-}
-
 /** Approval waterfall request (subset used by the bridge). */
 interface ApprovalRequestLike {
   readonly agent: Agent
@@ -243,13 +235,6 @@ class BridgeUserQuestionError extends Error {
     this.name = 'UserQuestionError'
     this.code = code
   }
-}
-
-function isDuplicateProviderError(error: unknown): boolean {
-  return error !== null
-    && typeof error === 'object'
-    && 'code' in error
-    && (error as { code: unknown }).code === 'DUPLICATE_PROVIDER'
 }
 
 const COMMAND_MENU: readonly BotCommand[] = [
@@ -411,7 +396,6 @@ export class TelegramBridge {
   private readonly maxMessageLength: number
   private readonly preset: string | undefined
   private readonly initAdminUserIds: number[]
-  private readonly registerQuestionProvider: boolean
   private readonly sleep: (ms: number) => Promise<void>
   private readonly chats = new Map<string, ChatSession>()
   /** Parked sessions keyed by `chatId:workspaceId`; switching away does not dispose them. */
@@ -444,7 +428,6 @@ export class TelegramBridge {
     this.maxMessageLength = options.maxMessageLength ?? 4096
     this.preset = options.preset
     this.initAdminUserIds = options.initAdminUserIds ?? []
-    this.registerQuestionProvider = options.registerQuestionProvider ?? true
     this.sleep = options.sleep ?? ((ms: number) => new Promise(resolve => setTimeout(resolve, ms)))
   }
 
@@ -454,12 +437,7 @@ export class TelegramBridge {
     this.disposeEvents = this.ctx.on('session/event', (session, event) => {
       this.handleSessionEvent(session, event)
     })
-    // Defer until sibling plugins (e.g. api-gateway) finish apply; only one
-    // userQuestions provider may register — web host wins on duplicate.
-    queueMicrotask(() => {
-      if (this.stopped || this.disposeInteractions !== undefined) return
-      this.disposeInteractions = this.registerInteractions()
-    })
+    this.disposeInteractions = this.registerInteractions()
     void this.pollLoop()
   }
 
@@ -698,8 +676,27 @@ export class TelegramBridge {
     const id = (await presets.resolve(this.preset)).id
     return {
       agentPreset: id,
-      setup: async agentCtx => { await presets.mount(agentCtx, id) },
+      setup: async (agentCtx) => {
+        await presets.mount(agentCtx, id)
+        try {
+          wireTeleAskUserTool(agentCtx, this)
+        } catch (error) {
+          this.ctx.logger.warn(
+            '[telegram] tele_ask_user wiring failed (session still usable): %s',
+            messageOf(error),
+          )
+        }
+        registerTelegramSessionHint(agentCtx)
+      },
     }
+  }
+
+  /**
+   * Deliver a user-question batch to the Telegram chat bound to `agent`.
+   * Used by the `tele_ask_user` tool on Telegram-bound agents.
+   */
+  askUserQuestion(request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer> {
+    return this.handleQuestionAsk(request)
   }
 
   private registry(): WorkspaceRegistryLike | undefined {
@@ -823,12 +820,17 @@ export class TelegramBridge {
       return
     }
     this.parkCurrent(chatId)
-    const opened = await this.openChat(chatId, workspace)
-    this.rememberBinding(chatId, workspace)
-    this.chats.set(key, opened.session)
-    await this.safeSend(chatId, usingWorkspaceText(workspace))
-    if (!opened.attached) await this.safeSend(chatId, ATTACH_FAILED_TEXT)
-    await this.safeSend(chatId, WELCOME_TEXT)
+    try {
+      const opened = await this.openChat(chatId, workspace)
+      this.rememberBinding(chatId, workspace)
+      this.chats.set(key, opened.session)
+      await this.safeSend(chatId, usingWorkspaceText(workspace))
+      if (!opened.attached) await this.safeSend(chatId, ATTACH_FAILED_TEXT)
+      await this.safeSend(chatId, WELCOME_TEXT)
+    } catch (error) {
+      this.ctx.logger.error('[telegram] bind workspace failed for chat %d: %s', chatId, messageOf(error))
+      await this.safeSend(chatId, `Failed to start session: ${messageOf(error)}`)
+    }
   }
 
   private rememberBinding(chatId: number, workspace: WorkspaceLike): void {
@@ -900,29 +902,10 @@ export class TelegramBridge {
   }
 
   private registerInteractions(): () => void {
-    const userQuestions = this.ctx.get('userQuestions') as UserQuestionsLike | undefined
-    if (userQuestions === undefined) {
-      throw new Error('telegram: missing userQuestions (the composition must provide the user-questions service)')
-    }
     if (this.ctx.get('approval') === undefined) {
       throw new Error('telegram: missing approval (the composition must provide the user-approval service)')
     }
     const disposers: Array<() => void> = []
-    if (this.registerQuestionProvider) {
-      try {
-        disposers.push(userQuestions.registerProvider({
-          ask: request => this.handleQuestionAsk(request),
-        }))
-      } catch (error) {
-        if (isDuplicateProviderError(error)) {
-          this.ctx.logger.info(
-            '[telegram] user-questions provider already registered (web host); skipping Telegram question UI',
-          )
-        } else {
-          throw error
-        }
-      }
-    }
     const registerApproval = this.ctx.on.bind(this.ctx) as (
       event: 'approval/request',
       handler: (req: ApprovalRequestLike, next: () => Promise<ApprovalOutcome>) => Promise<ApprovalOutcome>,
@@ -985,7 +968,21 @@ export class TelegramBridge {
     if (chatId === undefined) return next()
     const approvalId = this.findUnclaimedApprovalId(req)
     if (approvalId === undefined) return next()
-    return new Promise<ApprovalOutcome>((resolve) => {
+
+    let nextPromise: Promise<ApprovalOutcome> | undefined
+    try {
+      const downstream = next()
+      if (downstream !== undefined && typeof (downstream as Promise<ApprovalOutcome>).then === 'function') {
+        nextPromise = downstream as Promise<ApprovalOutcome>
+      }
+    } catch {
+      // Downstream handler threw before returning a promise; IM-only path below.
+    }
+
+    let winner: 'im' | 'web' = 'im'
+    let pendingRef: ApprovalPendingState | undefined
+
+    const imPromise = new Promise<ApprovalOutcome>((resolve) => {
       const pending: ApprovalPendingState = {
         kind: 'approval',
         id: generatePendingId(),
@@ -995,12 +992,33 @@ export class TelegramBridge {
         toolName: req.toolName,
         ...(req.reason === undefined ? {} : { reason: req.reason }),
         ...(req.signal === undefined ? {} : { signal: req.signal }),
-        resolve,
+        resolve: (outcome) => {
+          winner = 'im'
+          resolve(outcome)
+        },
       }
-      const onAbort = (): void => { this.settleApproval(pending, 'cancelled') }
+      pendingRef = pending
+      const onAbort = (): void => { void this.settleApproval(pending, 'cancelled') }
       pending.onAbort = onAbort
       req.signal?.addEventListener('abort', onAbort, { once: true })
       this.enqueuePending(pending)
+    })
+
+    const raced = nextPromise === undefined
+      ? imPromise
+      : Promise.race([
+          imPromise,
+          nextPromise.then((outcome) => {
+            winner = 'web'
+            return outcome
+          }),
+        ])
+
+    return raced.then(async (outcome) => {
+      if (winner === 'web' && pendingRef !== undefined) {
+        await this.dismissApprovalPending(pendingRef, '✓ Resolved on Web')
+      }
+      return outcome
     })
   }
 
@@ -1315,6 +1333,16 @@ export class TelegramBridge {
       pending.request.signal?.removeEventListener('abort', pending.onAbort)
     }
     pending.reject(new BridgeUserQuestionError('ask_user_question was aborted before the user answered', code))
+    this.finishPending(pending)
+  }
+
+  /** Remove a Telegram approval prompt when Web (or another channel) won the race. */
+  private async dismissApprovalPending(pending: ApprovalPendingState, suffix: string): Promise<void> {
+    if (!this.pendingById.has(pending.id)) return
+    await this.finalizeAnchor(pending.chatId, pending.anchorMessageId, pending.anchorPlainText ?? '', suffix)
+    if (pending.onAbort !== undefined) {
+      pending.signal?.removeEventListener('abort', pending.onAbort)
+    }
     this.finishPending(pending)
   }
 

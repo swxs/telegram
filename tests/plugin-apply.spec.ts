@@ -88,19 +88,16 @@ function provideInteractionServices(ctx: Context): void {
     provide?(name: string, value: unknown): void
     set?(name: string, value: unknown): void
   }
-  const userQuestions = { registerProvider: () => () => {} }
   const approval = {}
   if (typeof record.provide === 'function') {
-    record.provide('userQuestions', userQuestions)
     record.provide('approval', approval)
     return
   }
   if (typeof record.set === 'function') {
-    record.set('userQuestions', userQuestions)
     record.set('approval', approval)
     return
   }
-  Object.assign(ctx, { userQuestions, approval })
+  Object.assign(ctx, { approval })
 }
 
 describe('dsh-telegram plugin apply', () => {
@@ -171,18 +168,18 @@ describe('dsh-telegram plugin apply', () => {
     expect(() => apply(ctx as unknown as Context, { token: 'test-token' })).toThrow('missing agentPresets')
   })
 
-  it('fails loudly at load when userQuestions is missing', () => {
+  it('fails loudly at load when approval is missing', () => {
     const ctx = {
       get: (name: string) => name === 'agentPresets' ? {} : undefined,
       effect: () => {},
     }
-    expect(() => apply(ctx as unknown as Context, { token: 'test-token' })).toThrow('missing userQuestions')
+    expect(() => apply(ctx as unknown as Context, { token: 'test-token' })).toThrow('missing approval')
   })
 
   it('fails loudly at load when the proxy URL is not http or https', () => {
     const ctx = {
       get: (name: string) => {
-        if (name === 'agentPresets' || name === 'userQuestions' || name === 'approval') return {}
+        if (name === 'agentPresets' || name === 'approval') return {}
         return undefined
       },
       effect: () => {},

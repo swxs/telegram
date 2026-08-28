@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import { TelegramBridge } from '../src/bridge.ts'
+import { TELEGRAM_CHANNEL_SECTION, TELEGRAM_SESSION_HINT } from '../src/tele-ask-user.ts'
 import type { TelegramBridgeOptions } from '../src/bridge.ts'
 import type { BotCommand, InlineKeyboardMarkup, ReplyMarkup, TelegramClientLike, TelegramUpdate } from '../src/client.ts'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
@@ -30,6 +31,18 @@ interface CreateCall {
   setup?: (agentCtx: Context) => Promise<void>
 }
 
+interface MockTools {
+  register: Mock
+  restrict: Mock
+  registered: string[]
+  restricted: string[]
+}
+
+interface MockSystemPrompt {
+  section: Mock
+  sections: Array<{ name: string, order: number, text: string }>
+}
+
 interface Harness {
   bridge: TelegramBridge
   client: TelegramClientLike & {
@@ -51,6 +64,8 @@ interface Harness {
   agents: FakeHandle[]
   creates: CreateCall[]
   presets: { resolve: Mock; mount: Mock }
+  mockTools: MockTools
+  mockSystemPrompt: MockSystemPrompt
   attachSession: Mock
   workspaces: { id: string, path: string, title: string, attachSession: Mock }[]
   sent: { chatId: number, text: string, parseMode?: 'HTML', replyMarkup?: ReplyMarkup }[]
@@ -60,9 +75,6 @@ interface Harness {
   polls: (number | undefined)[]
   sleeps: number[]
   emit(sessionId: string, event: SessionEvent): void
-  questionProvider(): {
-    ask: (request: unknown) => Promise<{ answers: { id: string, selected: string[], custom?: string }[] }>
-  } | undefined
   approvalListeners: Array<(req: unknown, next: () => Promise<string>) => Promise<string>>
 }
 
@@ -73,7 +85,7 @@ interface HarnessSeams {
   workspaceRegistry?: 'default' | 'missing' | 'throwing' | 'empty'
   /** Default: two user-invocable skills. `missing` omits the service; `empty` lists none; `many` is 21 names. */
   skills?: 'default' | 'missing' | 'empty' | 'many'
-  /** Default: interaction services present. `missing` omits userQuestions/approval. */
+  /** Default: approval service present. `missing` omits approval. */
   interactions?: 'default' | 'missing'
 }
 
@@ -113,6 +125,28 @@ function createHarness(options: Partial<TelegramBridgeOptions> = {}, seams: Harn
     resolve: vi.fn(async (id?: string) => ({ id: id ?? 'standard' })),
     mount: vi.fn(async () => {}),
   }
+  const mockTools: MockTools = {
+    register: vi.fn((definition: { name: string }) => {
+      mockTools.registered.push(definition.name)
+      return () => {
+        const index = mockTools.registered.indexOf(definition.name)
+        if (index >= 0) mockTools.registered.splice(index, 1)
+      }
+    }),
+    restrict: vi.fn((filter: { deny?: string[] }) => {
+      mockTools.restricted.push(...(filter.deny ?? []))
+      return () => {}
+    }),
+    registered: [],
+    restricted: [],
+  }
+  const mockSystemPrompt: MockSystemPrompt = {
+    section: vi.fn((spec: { name: string, order: number, text: string }) => {
+      mockSystemPrompt.sections.push(spec)
+      return () => {}
+    }),
+    sections: [],
+  }
   const workspaces = [
     { id: 'ws-obsidian', path: 'D:\\codehouse\\obsidian', title: 'obsidian', attachSession },
     { id: 'ws-telegram', path: 'D:\\codehouse\\dsh-telegram', title: 'dsh-telegram', attachSession },
@@ -142,13 +176,6 @@ function createHarness(options: Partial<TelegramBridgeOptions> = {}, seams: Harn
   }
   let sessionListener: ((session: { id: string }, event: SessionEvent) => void) | undefined
   const approvalListeners: Array<(req: unknown, next: () => Promise<string>) => Promise<string>> = []
-  let questionProvider: { ask: (request: unknown) => Promise<{ answers: { id: string, selected: string[], custom?: string }[] }> } | undefined
-  const userQuestions = {
-    registerProvider: vi.fn((provider: typeof questionProvider) => {
-      questionProvider = provider
-      return () => { questionProvider = undefined }
-    }),
-  }
   let menu: BotCommand[] = []
   const client: TelegramClientLike & {
     getMe: Mock
@@ -217,11 +244,16 @@ function createHarness(options: Partial<TelegramBridgeOptions> = {}, seams: Harn
     agents: {
       create: vi.fn(async (opts: CreateCall) => {
         creates.push(opts)
+        const agentCtx = {
+          get: (name: string) => (name === 'tools' ? mockTools : ctx.get(name)),
+          systemPrompt: mockSystemPrompt,
+        }
+        if (opts.setup !== undefined) await opts.setup(agentCtx as unknown as Context)
         const handle: FakeHandle = {
           agent: {
             session: { id: opts.sessionId, events: [] },
             followup: vi.fn(),
-            ctx: { get: (name: string) => ctx.get(name) },
+            ctx: { get: (name: string) => agentCtx.get(name) },
           },
           dispose: vi.fn(),
         }
@@ -234,7 +266,6 @@ function createHarness(options: Partial<TelegramBridgeOptions> = {}, seams: Harn
       if (name === 'agentPresets') return seams.agentPresets === 'missing' ? undefined : presets
       if (name === 'workspaceRegistry') return seams.workspaceRegistry === 'missing' ? undefined : registry
       if (name === 'skills') return seams.skills === 'missing' ? undefined : skills
-      if (name === 'userQuestions') return seams.interactions === 'missing' ? undefined : userQuestions
       if (name === 'approval') return seams.interactions === 'missing' ? undefined : {}
       return undefined
     }),
@@ -254,6 +285,8 @@ function createHarness(options: Partial<TelegramBridgeOptions> = {}, seams: Harn
     agents,
     creates,
     presets,
+    mockTools,
+    mockSystemPrompt,
     attachSession,
     workspaces,
     sent,
@@ -265,7 +298,6 @@ function createHarness(options: Partial<TelegramBridgeOptions> = {}, seams: Harn
     emit(sessionId: string, event: SessionEvent): void {
       sessionListener?.({ id: sessionId }, event)
     },
-    questionProvider: () => questionProvider,
     approvalListeners,
   }
   current = harness
@@ -323,9 +355,7 @@ describe('TelegramBridge', () => {
     const h = createHarness()
     h.bridge.start()
     expect(h.ctx.on).toHaveBeenCalledWith('session/event', expect.any(Function))
-    await settle()
     expect(h.ctx.on).toHaveBeenCalledWith('approval/request', expect.any(Function))
-    expect(h.questionProvider()).toBeDefined()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'first poll')
   })
 
@@ -715,7 +745,6 @@ describe('TelegramBridge', () => {
       agents: { create: vi.fn() },
       logger: { warn: vi.fn(), error: vi.fn() },
       get: vi.fn((name: string) => {
-        if (name === 'userQuestions') return { registerProvider: () => () => {} }
         if (name === 'approval') return {}
         return undefined
       }),
@@ -743,7 +772,6 @@ describe('TelegramBridge', () => {
       agents: { create: vi.fn() },
       logger: { warn: vi.fn(), error: vi.fn() },
       get: vi.fn((name: string) => {
-        if (name === 'userQuestions') return { registerProvider: () => () => {} }
         if (name === 'approval') return {}
         return undefined
       }),
@@ -1053,6 +1081,55 @@ describe('TelegramBridge', () => {
     await waitFor(() => h.sent.some(s => s.text === 'No skills are available in this workspace.') ? true : undefined, 'missing notice')
   })
 
+  it('wires tele_ask_user and hides ask_user_question when creating an agent', async () => {
+    const h = createHarness()
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    await bindDefaultWorkspace(h)
+    expect(h.mockTools.restricted).toContain('ask_user_question')
+    expect(h.mockTools.registered).toContain('tele_ask_user')
+    expect(h.mockSystemPrompt.sections.some(s => s.name === TELEGRAM_CHANNEL_SECTION)).toBe(true)
+    expect(h.mockSystemPrompt.sections.find(s => s.name === TELEGRAM_CHANNEL_SECTION)?.text).toBe(TELEGRAM_SESSION_HINT)
+    expect(h.creates[0]?.setup).toBeTypeOf('function')
+    expect(h.agents.length).toBeGreaterThan(0)
+  })
+
+  it('binds workspace even when tele_ask_user wiring throws', async () => {
+    const h = createHarness()
+    h.mockTools.register.mockImplementation(() => {
+      throw new Error('invalid tool schema')
+    })
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    await bindDefaultWorkspace(h)
+    expect(h.agents.length).toBeGreaterThan(0)
+    expect(h.ctx.logger.warn).toHaveBeenCalled()
+  })
+
+  it('askUserQuestion delivers UI for tele_ask_user path', async () => {
+    const h = createHarness()
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    await bindDefaultWorkspace(h)
+    const agent = h.agents[0]?.agent
+    expect(agent).toBeDefined()
+    const answered = h.bridge.askUserQuestion({
+      agent,
+      questions: [{ id: 'mode', question: 'Pick mode?', options: [{ label: 'Fast' }] }],
+    })
+    void answered.catch(() => {})
+    await waitFor(() => h.sent.some(s => s.text === 'Pick mode?') ? true : undefined, 'question sent')
+    const prompt = h.sent.findLast(s => s.text === 'Pick mode?')
+    const callback = prompt?.replyMarkup?.inline_keyboard?.flat().find(row => row.callback_data?.startsWith('uq:'))?.callback_data
+    expect(callback).toBeDefined()
+    h.client.getUpdates.mockResolvedValueOnce([callbackUpdate({
+      updateId: 4,
+      data: callback!.replace(':s:0', ':s:0'),
+      text: 'Pick mode?',
+    })])
+    await expect(answered).resolves.toEqual({ answers: [{ id: 'mode', selected: ['Fast'] }] })
+  })
+
   it('delivers a user question and resolves on single-select callback', async () => {
     const h = createHarness()
     h.bridge.start()
@@ -1060,9 +1137,7 @@ describe('TelegramBridge', () => {
     await bindDefaultWorkspace(h)
     const agent = h.agents[0]?.agent
     expect(agent).toBeDefined()
-    const provider = h.questionProvider()
-    expect(provider).toBeDefined()
-    const answered = provider!.ask({
+    const answered = h.bridge.askUserQuestion({
       agent,
       questions: [{ id: 'lang', question: 'Pick a language?', options: [{ label: 'TypeScript' }, { label: 'Python' }] }],
     })
@@ -1085,7 +1160,7 @@ describe('TelegramBridge', () => {
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
     await bindDefaultWorkspace(h)
     const agent = h.agents[0]?.agent
-    const answered = h.questionProvider()!.ask({
+    const answered = h.bridge.askUserQuestion({
       agent,
       questions: [{ id: 'q', question: 'Waiting?', options: [{ label: 'A' }] }],
     })
@@ -1111,7 +1186,7 @@ describe('TelegramBridge', () => {
     const decided = listener!({
       agent,
       toolName: 'bash',
-    }, async () => 'unavailable')
+    }, () => new Promise<string>(() => {}))
     await waitFor(() => h.sent.some(s => s.text.includes('Allow tool')) ? true : undefined, 'approval sent')
     const prompt = h.sent.findLast(s => s.text.includes('Allow tool'))
     const allow = prompt?.replyMarkup?.inline_keyboard?.flat().find(b => b.callback_data?.endsWith(':a'))?.callback_data
@@ -1122,5 +1197,32 @@ describe('TelegramBridge', () => {
       text: prompt?.text,
     })])
     await expect(decided).resolves.toBe('allowed-once')
+  })
+
+  it('races tool approval against downstream Web handler', async () => {
+    const h = createHarness()
+    h.bridge.start()
+    await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
+    await bindDefaultWorkspace(h)
+    const agent = h.agents[0]?.agent as { session: { id: string, events: SessionEvent[] } }
+    agent.session.events.push({
+      type: 'approval/asked',
+      data: { id: 'approval-race', toolName: 'bash' },
+    } as SessionEvent)
+    const listener = h.approvalListeners[0]
+    expect(listener).toBeDefined()
+    let releaseWeb: ((value: string) => void) | undefined
+    const webPromise = new Promise<string>(resolve => { releaseWeb = resolve })
+    const decided = listener!({
+      agent,
+      toolName: 'bash',
+    }, () => webPromise)
+    await waitFor(() => h.sent.some(s => s.text.includes('Allow tool')) ? true : undefined, 'approval sent')
+    releaseWeb!('allowed-once')
+    await expect(decided).resolves.toBe('allowed-once')
+    await waitFor(
+      () => h.edits.some(e => e.text.includes('Resolved on Web')) ? true : undefined,
+      'telegram prompt dismissed',
+    )
   })
 })

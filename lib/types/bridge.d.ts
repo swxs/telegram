@@ -7,6 +7,7 @@
  * @module telegram/bridge
  */
 import type { Context } from '@deepseek-ai/cordis';
+import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { TelegramClientLike } from './client.js';
 /** Options for {@link TelegramBridge}. */
 export interface TelegramBridgeOptions {
@@ -44,11 +45,42 @@ export interface TelegramBridgeOptions {
     client?: TelegramClientLike;
     /** Delay seam; tests substitute an instant sleep. */
     sleep?: (ms: number) => Promise<void>;
-    /**
-     * Register `userQuestions` provider for Telegram UI. When false, only
-     * approval is wired (for compositions where the web host owns questions).
-     */
-    registerQuestionProvider?: boolean;
+}
+/** One selectable option in a user-questions request. */
+interface AskUserQuestionOption {
+    readonly label: string;
+    readonly description?: string;
+}
+/** Plan-review or generic presentation intent on a question. */
+interface AskUserQuestionIntent {
+    readonly kind: 'plan-review';
+    readonly approve: string;
+}
+/** One question in a user-questions batch. */
+interface AskUserQuestionItem {
+    readonly id: string;
+    readonly question: string;
+    readonly detail?: string;
+    readonly header?: string;
+    readonly options?: readonly AskUserQuestionOption[];
+    readonly multiSelect?: boolean;
+    readonly intent?: AskUserQuestionIntent;
+}
+/** Human answer to one question. */
+interface AskUserQuestionAnswerItem {
+    readonly id: string;
+    readonly selected: string[];
+    readonly custom?: string;
+}
+/** Full answer payload for `userQuestions.ask()`. */
+interface AskUserQuestionAnswer {
+    readonly answers: AskUserQuestionAnswerItem[];
+}
+/** User-questions provider request. */
+interface AskUserQuestionRequest {
+    readonly questions: readonly AskUserQuestionItem[];
+    readonly agent?: Agent;
+    readonly signal?: AbortSignal;
 }
 /**
  * Bridge between Telegram chats and harness agent sessions. One agent
@@ -67,7 +99,6 @@ export declare class TelegramBridge {
     private readonly maxMessageLength;
     private readonly preset;
     private readonly initAdminUserIds;
-    private readonly registerQuestionProvider;
     private readonly sleep;
     private readonly chats;
     /** Parked sessions keyed by `chatId:workspaceId`; switching away does not dispose them. */
@@ -102,6 +133,11 @@ export declare class TelegramBridge {
      * layer. Mirrors dsh-host-apiproxy's composeAgent for the web surface.
      */
     private composeAgent;
+    /**
+     * Deliver a user-question batch to the Telegram chat bound to `agent`.
+     * Used by the `tele_ask_user` tool on Telegram-bound agents.
+     */
+    askUserQuestion(request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer>;
     private registry;
     private listWorkspaces;
     private lookupWorkspace;
@@ -153,6 +189,8 @@ export declare class TelegramBridge {
     private recordQuestionAnswer;
     private completeQuestionPending;
     private cancelQuestionPending;
+    /** Remove a Telegram approval prompt when Web (or another channel) won the race. */
+    private dismissApprovalPending;
     private settleApproval;
     private finalizeAnchor;
     /** Escape text for Telegram HTML tag bodies (not full markdown). */
@@ -166,3 +204,4 @@ export declare class TelegramBridge {
     private safeSend;
     private safeAction;
 }
+export {};
