@@ -78,6 +78,7 @@ link_pkg @deepseek-ai/schemastery vendor/schemastery
 link_pkg @deepseek-ai/dsh-agent packages/core/agent
 link_pkg @deepseek-ai/dsh-brand packages/util/brand
 link_pkg @deepseek-ai/dsh-llm packages/llm/llm
+link_pkg @deepseek-ai/dsh-timeout packages/util/timeout
 link_pkg @deepseek-ai/dsh-scope packages/core/scope
 link_pkg @deepseek-ai/dsh-session packages/core/session
 

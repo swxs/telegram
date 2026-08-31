@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1] - 2026-08-31
+
+修复本地构建与 `dsh web` 加载时缺少 `dsh-llm` 运行时依赖的问题。
+
+### Fixed
+
+- `scripts/build.sh` 链接 `@deepseek-ai/dsh-timeout`（`dsh-llm` 的 peer 依赖），避免插件加载时报 `Cannot find package '@deepseek-ai/dsh-timeout'`。
+
 ## [0.3.0] - 2026-08-28
 
 对话期交互：模型提问与工具授权走 Telegram，并与 web 同载共存。
