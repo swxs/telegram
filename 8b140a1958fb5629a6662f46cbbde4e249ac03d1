@@ -1,0 +1,26 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "8b140a1958fb5629a6662f46cbbde4e249ac03d1",
+  "prompts": {
+    "eb0d56efca12e32f": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f7be4734-3347-41e9-976e-7447025b37ff",
+        "model": "composer-2.5"
+      },
+      "human_author": "swxs",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 2857,
+      "overriden_lines": 0
+    }
+  },
+  "humans": {
+    "h_ee4a963711c0f7": {
+      "author": "swxs"
+    }
+  }
+}
