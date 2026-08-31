@@ -18,11 +18,6 @@
 - 工具授权（`approval/request`）投递到 Telegram（Allow once / Reject / Cancel），与 Web 端 race。
 - 每个聊天 FIFO 排队：同时只展示一条 pending 交互；有 pending 时普通文本不转发给 agent。
 
-### Changed
-
-- `inject` 不再包含 `userQuestions`，也不注册 provider，避免与 web `api-gateway` 冲突。计划审核（`exit_plan_mode`）不由本插件处理。
-- 加载时强制要求 `approval`。
-
 ### Fixed
 
 - 绑定 Workspace / 创建会话失败时向聊天报错，而不再静默中断。
