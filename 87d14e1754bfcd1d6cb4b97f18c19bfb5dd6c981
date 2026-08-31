@@ -1,0 +1,40 @@
+scripts/build.sh
+  97d2b81ce096785d 81
+package.json
+  97d2b81ce096785d 4
+CHANGELOG.md
+  97d2b81ce096785d 3,5,7,9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "87d14e1754bfcd1d6cb4b97f18c19bfb5dd6c981",
+  "prompts": {
+    "97d2b81ce096785d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "91fcb5c8-ac0c-4fe8-bc6f-4ac476300f4e",
+        "model": "composer-2.5"
+      },
+      "human_author": "swxs",
+      "messages": [],
+      "total_additions": 159,
+      "total_deletions": 153,
+      "accepted_lines": 113,
+      "overriden_lines": 12
+    },
+    "eb0d56efca12e32f": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f7be4734-3347-41e9-976e-7447025b37ff",
+        "model": "composer-2.5"
+      },
+      "human_author": "swxs",
+      "messages": [],
+      "total_additions": 2936,
+      "total_deletions": 2863,
+      "accepted_lines": 2845,
+      "overriden_lines": 12
+    }
+  }
+}
