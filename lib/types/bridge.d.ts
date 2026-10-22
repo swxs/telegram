@@ -153,15 +153,19 @@ export declare class TelegramBridge {
      * Bind this chat to `workspace`. Selecting the same Workspace keeps the
      * current session. Selecting one this chat already used restores that
      * parked session. A first pick for that Workspace opens a new session,
-     * attaches it, and welcomes the user. The previous session stays live
-     * under its Workspace; only `/clear` and process stop dispose it.
+     * attaches it, and welcomes the user. The previous session stays listed
+     * with its Workspace.
      */
     private bindWorkspace;
     private rememberBinding;
     private parkKey;
     /** Park the chat's current session so a later pick can restore it. */
     private parkCurrent;
-    /** Replace the chat's session, keeping the bound Workspace. */
+    /**
+     * Replace the chat's session, keeping the bound Workspace.
+     * The previous session is left live, so it stays listed with that Workspace.
+     * Disposing it would drop it from the web history. This chat does not resume it.
+     */
     private rotateChat;
     private openChat;
     /**

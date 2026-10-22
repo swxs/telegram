@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.0] - 2026-10-22
+
+适配 dsh 0.2.1-rc.2。`/clear` 换上新会话时，上一段会话继续留在网页历史里。
+
+### Changed
+
+- `@deepseek-ai/dsh-agent`、`dsh-llm`、`dsh-session` 的 peer 范围抬到 `^0.2.1-rc.2`。
+- 工具授权从 `Session.snapshotEvents()` 读取尚未决定的 `approval/asked`。
+- `examples/telegram-agent` 的组合改用这一版仍在的包名和 entry id。
+- `/clear` 不再 dispose 上一段会话。聊天换上新会话，旧会话留在 Workspace 账本上，网页历史继续可见，这个聊天不再回到它。
+
+### Fixed
+
+- `scripts/build.sh` 不再链接已删除的 `dsh-agent-spine-demo`。
+
 ## [0.3.1] - 2026-08-31
 
 修复本地构建与 `dsh web` 加载时缺少 `dsh-llm` 运行时依赖的问题。

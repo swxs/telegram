@@ -25,7 +25,7 @@ A persistent dsh record of a directory the user works in: a stable id over a can
 _Avoid_: cwd, folder, project, working directory, 工作目录 (unqualified)
 
 **Workspace binding**:
-The in-memory association of one Telegram chat with one Workspace. Sessions created in that chat use that Workspace's path and are attached to its ledger. Switching Workspace parks the previous session so it stays on that Workspace's ledger; `/clear` and process stop dispose it. The binding is lost when the process restarts.
+The in-memory association of one Telegram chat with one Workspace. Sessions created in that chat use that Workspace's path and are attached to its ledger. Switching Workspace parks the previous session so it stays on that Workspace's ledger and can be restored by selecting that Workspace again. `/clear` leaves the previous session on that ledger and listed with the Workspace, and the chat starts a new session without resuming the cleared one. The binding is lost when the process restarts.
 _Avoid_: cwd, selected folder, working directory
 
 **Skill**:

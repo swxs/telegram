@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import * as agentCore from '@deepseek-ai/dsh-agent-spine-demo'
 import * as telegram from '../src/index.ts'
 import { apply } from '../src/index.ts'
 import type { TelegramClientLike } from '../src/client.ts'
 
 /**
- * Mount the real namespace plugin on a real Context with the agent spine,
- * using a fake client seam. Covers the full mount/poll/dispose lifecycle and
+ * Mount the real namespace plugin on a real Context. The agents service is a
+ * stub: dsh 0.2.1-rc.2 has no agent-spine-demo package. A fake client seam
+ * covers the mount/poll/dispose lifecycle and
  * the fail-loud missing-token path; message flow is covered by the bridge
  * unit tests because a turn needs a live LLM adapter.
  */
@@ -66,6 +66,23 @@ function fakePresets(): {
   }
 }
 
+function provideAgents(ctx: Context): void {
+  const agents = {}
+  const record = ctx as Context & {
+    provide?(name: string, value: unknown): void
+    set?(name: string, value: unknown): void
+  }
+  if (typeof record.provide === 'function') {
+    record.provide('agents', agents)
+    return
+  }
+  if (typeof record.set === 'function') {
+    record.set('agents', agents)
+    return
+  }
+  Object.assign(ctx, { agents })
+}
+
 function provideAgentPresets(ctx: Context): void {
   const service = fakePresets()
   const record = ctx as Context & {
@@ -101,10 +118,10 @@ function provideInteractionServices(ctx: Context): void {
 }
 
 describe('dsh-telegram plugin apply', () => {
-  it('mounts on the agent spine, polls through the client seam, and disposes cleanly', async () => {
+  it('mounts, polls through the client seam, and disposes cleanly', async () => {
     const client = fakeClient()
     const ctx = new Context()
-    await ctx.plugin(agentCore, { workspaceContext: false })
+    provideAgents(ctx)
     provideAgentPresets(ctx)
     provideInteractionServices(ctx)
     await ctx.plugin(telegram, { token: 'test-token', client, sleep: async (ms: number) => new Promise(resolve => setTimeout(resolve, ms)) })
@@ -117,8 +134,9 @@ describe('dsh-telegram plugin apply', () => {
 
   it('fails loudly at load when the token is missing', async () => {
     const ctx = new Context()
-    await ctx.plugin(agentCore, { workspaceContext: false })
+    provideAgents(ctx)
     provideAgentPresets(ctx)
+    provideInteractionServices(ctx)
     await expect(ctx.plugin(telegram, {})).rejects.toThrow('missing bot token')
   })
 
@@ -128,7 +146,7 @@ describe('dsh-telegram plugin apply', () => {
     try {
       const client = fakeClient()
       const ctx = new Context()
-      await ctx.plugin(agentCore, { workspaceContext: false })
+      provideAgents(ctx)
       provideAgentPresets(ctx)
       provideInteractionServices(ctx)
       await ctx.plugin(telegram, { client, sleep: async (ms: number) => new Promise(resolve => setTimeout(resolve, ms)) })
@@ -148,8 +166,9 @@ describe('dsh-telegram plugin apply', () => {
     process.env.DSH_TELEGRAM_TOKEN = ''
     try {
       const ctx = new Context()
-      await ctx.plugin(agentCore, { workspaceContext: false })
+      provideAgents(ctx)
       provideAgentPresets(ctx)
+      provideInteractionServices(ctx)
       await expect(ctx.plugin(telegram, {})).rejects.toThrow('missing bot token')
     } finally {
       if (previous === undefined) {

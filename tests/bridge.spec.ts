@@ -7,7 +7,11 @@ import type { BotCommand, InlineKeyboardMarkup, ReplyMarkup, TelegramClientLike,
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 interface FakeAgent {
-  session: { id: string, events?: SessionEvent[] }
+  session: {
+    id: string
+    events?: SessionEvent[]
+    snapshotEvents?: () => readonly SessionEvent[]
+  }
   followup: ReturnType<typeof vi.fn>
   ctx: { get: Mock }
 }
@@ -251,7 +255,13 @@ function createHarness(options: Partial<TelegramBridgeOptions> = {}, seams: Harn
         if (opts.setup !== undefined) await opts.setup(agentCtx as unknown as Context)
         const handle: FakeHandle = {
           agent: {
-            session: { id: opts.sessionId, events: [] },
+            session: {
+              id: opts.sessionId,
+              events: [],
+              snapshotEvents() {
+                return this.events
+              },
+            },
             followup: vi.fn(),
             ctx: { get: (name: string) => agentCtx.get(name) },
           },
@@ -433,7 +443,7 @@ describe('TelegramBridge', () => {
     expect(h.sent[0]?.text).not.toContain('D:\\codehouse\\')
   })
 
-  it('/clear rotates the session agent and disposes the previous one', async () => {
+  it('/clear rotates the session and leaves the previous one alive', async () => {
     const h = createHarness()
     h.bridge.start()
     await waitFor(() => h.polls.length > 0 ? true : undefined, 'polling')
@@ -441,9 +451,9 @@ describe('TelegramBridge', () => {
     const first = h.agents[0]!
     h.client.getUpdates.mockResolvedValueOnce([update({ text: '/clear', updateId: 2 })])
     await waitFor(() => h.agents.length === 2 ? true : undefined, 'second agent')
-    expect(first.dispose).toHaveBeenCalledTimes(1)
+    expect(first.dispose).not.toHaveBeenCalled()
     expect(h.creates[1]?.meta?.cwd).toBe('D:\\codehouse\\obsidian')
-    // Old-session events no longer deliver.
+    // Old-session events no longer deliver to this chat.
     h.emit(first.agent.session.id, { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'stale' }] } } } as SessionEvent)
     await settle()
     expect(h.sent.some(s => s.text === 'stale')).toBe(false)

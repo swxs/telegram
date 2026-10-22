@@ -5,7 +5,7 @@
 # Unlike jsonrpc-agent, stdout carries no protocol, so a console logger is safe.
 
 - id: logger-console
-  name: '@cordisjs/plugin-logger-console'
+  name: '@deepseek-ai/cordis-plugin-logger-console'
 
 - id: user-questions
   name: '@deepseek-ai/dsh-user-questions'
@@ -13,7 +13,7 @@
 - id: tool-ask-user
   name: '@deepseek-ai/dsh-tool-ask-user'
 
-- id: user-approval
+- id: approval
   name: '@deepseek-ai/dsh-user-approval'
 
 - id: plan-mode
@@ -35,9 +35,10 @@
 # The DeepSeek adapter. Shipped default: full thinking at max effort on every
 # request; exact-model resolution materializes request defaults before logging.
 - id: llm-deepseek
-  name: '@deepseek-ai/dsh-llm-deepseek'
+  name: '@deepseek-ai/dsh-llm-deepseek-api-key'
   config:
-    apiKey: !!js process.env.DEEPSEEK_API_KEY
+    # Credential ref. The default name is DEEPSEEK_API_KEY; this row does not
+    # put the key itself in config.
     baseURL: !!js process.env.DEEPSEEK_BASE_URL
     thinking: enabled
     reasoningEffort: max
@@ -52,32 +53,30 @@
     cwd: !!js process.env.DSH_CWD ?? process.cwd()
     timeoutMs: 60000
 
-- id: agent-spine
-  name: '@deepseek-ai/dsh-agent-spine-demo'
-  config:
-    persona: !!js process.env.DSH_SYSTEM_PROMPT ?? 'You are a coding agent.'
-    workspaceContext: false
-    skills:
-      enabled: false
-    toolBash:
-      enableRunInBackground: false
-    toolTasks: false
+# Registry only. The loop is @deepseek-ai/dsh-agent-loop; a web profile mounts
+# it from dsh-base together with llm, tools, and systemPrompt. Persona and
+# tools come from the agent preset, not from this row.
+- id: agent
+  name: '@deepseek-ai/dsh-agent'
 
-- id: sessions
+- id: session
+  name: '@deepseek-ai/dsh-session'
+
+- id: session-persistence-jsonl
   name: '@deepseek-ai/dsh-session-persistence-jsonl'
   config:
     root: !!js process.env.DSH_SESSION_ROOT ?? './.sessions'
     # Snapshot runs read the raw JSONL back; production keeps zstd frames.
     compression: !!js "process.env.DSH_SNAPSHOT === undefined ? 'zstd' : 'none'"
 
-- id: session-checkpoints
+- id: session-checkpoint-policy
   name: '@deepseek-ai/dsh-session-checkpoint-policy'
 
 - id: subagent
   name: '@deepseek-ai/dsh-subagent'
 
-- id: subagent-spawn
-  name: '@deepseek-ai/dsh-subagent-spawn'
+- id: subagent-spawn-in-process
+  name: '@deepseek-ai/dsh-subagent-spawn-in-process'
   config:
     providerName: spawn
 
@@ -96,8 +95,8 @@
   config:
     cwd: !!js process.env.DSH_CWD ?? process.cwd()
 
-- id: fs-policy
-  name: '@deepseek-ai/dsh-fs-policy'
+- id: fs-observation-policy
+  name: '@deepseek-ai/dsh-fs-observation-policy'
 
 - id: tool-fs
   name: '@deepseek-ai/dsh-tool-fs'
@@ -105,8 +104,8 @@
 - id: token-meter
   name: '@deepseek-ai/dsh-token-meter'
 
-- id: compact-basic
-  name: '@deepseek-ai/dsh-compact-basic'
+- id: compaction-basic
+  name: '@deepseek-ai/dsh-compaction-basic'
   config:
     thresholdRatio: 0.8
     retainRatio: 0.16

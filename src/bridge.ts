@@ -798,8 +798,8 @@ export class TelegramBridge {
    * Bind this chat to `workspace`. Selecting the same Workspace keeps the
    * current session. Selecting one this chat already used restores that
    * parked session. A first pick for that Workspace opens a new session,
-   * attaches it, and welcomes the user. The previous session stays live
-   * under its Workspace; only `/clear` and process stop dispose it.
+   * attaches it, and welcomes the user. The previous session stays listed
+   * with its Workspace.
    */
   private async bindWorkspace(chatId: number, workspace: WorkspaceLike): Promise<void> {
     const key = String(chatId)
@@ -852,13 +852,15 @@ export class TelegramBridge {
     this.parked.set(this.parkKey(chatId, current.workspaceId), current)
   }
 
-  /** Replace the chat's session, keeping the bound Workspace. */
+  /**
+   * Replace the chat's session, keeping the bound Workspace.
+   * The previous session is left live, so it stays listed with that Workspace.
+   * Disposing it would drop it from the web history. This chat does not resume it.
+   */
   private async rotateChat(chatId: number, workspace: WorkspaceLike): Promise<void> {
     const key = String(chatId)
-    const previous = this.chats.get(key)
     const opened = await this.openChat(chatId, workspace)
     this.chats.set(key, opened.session)
-    if (previous !== undefined) await previous.handle.dispose()
     if (!opened.attached) await this.safeSend(chatId, ATTACH_FAILED_TEXT)
   }
 
@@ -1074,7 +1076,11 @@ export class TelegramBridge {
   }
 
   private findUnclaimedApprovalId(req: ApprovalRequestLike): string | undefined {
-    const events = req.agent.session.events as readonly { type: string, data: Record<string, unknown> }[]
+    // 0.2.1-rc.2 reads the session log through snapshotEvents(). This checkout's
+    // emitted Session types lag that source, so the call is narrowed here.
+    const events = (req.agent.session as Session & {
+      snapshotEvents(): readonly { type: string, data: Record<string, unknown> }[]
+    }).snapshotEvents()
     const claimed = new Set<string>()
     for (const pending of this.pendingById.values()) {
       if (pending.kind === 'approval') claimed.add(pending.approvalId)

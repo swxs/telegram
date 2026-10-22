@@ -82,11 +82,10 @@ link_pkg @deepseek-ai/dsh-timeout packages/util/timeout
 link_pkg @deepseek-ai/dsh-scope packages/core/scope
 link_pkg @deepseek-ai/dsh-session packages/core/session
 
-# Test-only deps: the loader (plugin-shape spec) and the demo agent spine
-# (plugin-apply spec); vitest + its type deps so tests/ can run against the
-# same checkout if desired.
+# Test-only deps: the loader (plugin-shape spec) and vitest, so tests/ can
+# run against the same checkout if desired. The demo agent spine package is
+# gone on dsh 0.2.1-rc.2; plugin-apply stubs the agents service instead.
 link_pkg @deepseek-ai/cordis-plugin-loader vendor/loader
-link_pkg @deepseek-ai/dsh-agent-spine-demo packages/examples/agent-spine-demo
 link_dir "$CHECKOUT/node_modules/@vitest" node_modules/@vitest
 link_dir "$CHECKOUT/node_modules/vitest" node_modules/vitest
 
