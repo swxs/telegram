@@ -19,3 +19,17 @@
 ## 历史
 
 动手改功能前，先读 `docs/` 下的文档，了解这项能力是怎么定下来的、做过哪些取舍。
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs live as GitHub issues in `swxs/telegram` (this clone's `origin`), driven through the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles map 1:1 to the labels `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`; `/wayfinder` additionally uses `wayfinder:map` and `wayfinder:<research|prototype|grilling|task>`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one root `CONTEXT.md` glossary; `docs/adr/` is created lazily as decisions land. See `docs/agents/domain.md`.
